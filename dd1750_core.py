@@ -1,4 +1,4 @@
-"""DD1750 core - Simple, items only."""
+"""DD1750 core - Supports auto-merge."""
 
 import io
 import math
@@ -9,6 +9,8 @@ from typing import List
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.lib.pagesizes import letter
 
 
 ROWS_PER_PAGE = 18
@@ -24,6 +26,7 @@ X_TOTAL_L, X_TOTAL_R = 514.5, 566.0
 Y_TABLE_TOP = 616.0
 Y_TABLE_BOTTOM = 89.5
 ROW_H = (Y_TABLE_TOP - Y_TABLE_BOTTOM) / ROWS_PER_PAGE
+PAD_X = 3.0
 
 
 @dataclass
@@ -36,9 +39,11 @@ class BomItem:
 
 def extract_items_from_pdf(pdf_path: str) -> List[BomItem]:
     items = []
+    
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             tables = page.extract_tables()
+            
             for table in tables:
                 if len(table) < 2:
                     continue
@@ -49,7 +54,7 @@ def extract_items_from_pdf(pdf_path: str) -> List[BomItem]:
                 for i, cell in enumerate(header):
                     if cell:
                         text = str(cell).upper()
-                        if 'LV' in text:
+                        if 'LV' in text or 'LEVEL' in text:
                             lv_idx = i
                         elif 'DESC' in text:
                             desc_idx = i
@@ -73,79 +78,77 @@ def extract_items_from_pdf(pdf_path: str) -> List[BomItem]:
                     description = ""
                     if desc_cell:
                         lines = str(desc_cell).strip().split('\n')
-                        if len(lines) >= 2:
-                            description = lines[1].strip()
+                        description = lines[1].strip() if len(lines) >= 2 else lines[0].strip()
                         if '(' in description:
                             description = description.split('(')[0].strip()
-                        
-                        nsn = ""
-                        if mat_idx > -1:
-                            mat_cell = row[mat_idx]
-                            if mat_cell:
-                                m = re.search(r'\b(\d{9})\b', str(mat_cell))
-                                if m:
-                                    nsn = m.group(1)
-                        
-                        qty = 1
-                        if auth_idx > -1:
-                            qty_cell = row[auth_idx]
-                            if qty_cell:
-                                try:
-                                    qty = int(str(qty_cell).strip())
-                                except:
-                                    qty = 1
-                        
-                        items.append(BomItem(len(items) + 1, description[:100], nsn, qty))
+                        description = re.sub(r'\s+(WTY|ARC|CIIC|UI|SCMC|EA|AY|9K|9G)$', '', description, flags=re.IGNORECASE)
+                        description = re.sub(r'\s+', ' ', description).strip()
+                    
+                    if not description:
+                        continue
+                    
+                    nsn = ""
+                    if mat_idx > -1:
+                        mat_cell = row[mat_idx]
+                        if mat_cell:
+                            match = re.search(r'\b(\d{9})\b', str(mat_cell))
+                            if match:
+                                nsn = match.group(1)
+                    
+                    qty = 1
+                    if auth_idx > -1:
+                        qty_cell = row[auth_idx]
+                        if qty_cell:
+                            try:
+                                qty = int(str(qty_cell).strip())
+                            except:
+                                pass
+                    
+                    items.append(BomItem(len(items) + 1, description[:100], nsn, qty))
     
     return items
 
 
-def generate_dd1750_from_pdf(bom_path: str, template_path: str, out_path: str):
+def generate_dd1750_from_pdf(bom_path, template_path, out_pdf_path, start_page=0):
     items = extract_items_from_pdf(bom_path)
     
     if not items:
         return out_path, 0
     
     total_pages = math.ceil(len(items) / ROWS_PER_PAGE)
-    
     writer = PdfWriter()
     
-    for page_num in range(total_pages):
-        start_idx = page_num * ROWS_PER_PAGE
-        end_idx = min((page_num + 1) * ROWS_PER_PAGE, len(items))
-        page_items = items[start_idx:end_idx]
+    # Create items PDF (no template merge - simple, works)
+    packet = io.BytesIO()
+    c = canvas.Canvas(packet, pagesize=letter)
+    
+    first_row_top = Y_TABLE_TOP - 5.0
+    
+    for i, item in enumerate(items):
+        y = first_row_top - (i * ROW_H)
+        y_desc = y - 7.0
+        y_nsn = y - 12.2
         
-        packet = io.BytesIO()
-        c = canvas.Canvas(packet, pagesize=letter)
+        c.setFont("Helvetica", 8)
+        c.drawCentredString(66, y_desc, str(item.line_no))
         
-        first_row = Y_TABLE_TOP - 5.0
+        c.setFont("Helvetica", 7)
+        c.drawString(92, y_desc, item.description[:50])
         
-        for i, item in enumerate(page_items):
-            y = first_row - (i * ROW_H)
-            
-            c.setFont("Helvetica", 8)
-            c.drawCentredString(66, y - 7, str(item.line_no))
-            
-            c.setFont("Helvetica", 7)
-            c.drawString(92, y - 7, item.description[:50])
-            
-            if item.nsn:
-                c.setFont("Helvetica", 6)
-                c.drawString(92, y - 12, f"NSN: {item.nsn}")
-            
-            c.setFont("Helvetica", 8)
-            c.drawCentredString(386, y - 7, "EA")
-            c.drawCentredString(431, y - 7, str(item.qty))
-            c.drawCentredString(484, y - 7, "0")
-            c.drawCentredString(540, y - 7, str(item.qty))
+        if item.nsn:
+            c.setFont("Helvetica", 6)
+            c.drawString(92, y_nsn, f"NSN: {item.nsn}")
         
-        c.save()
-        packet.seek(0)
-        
-        overlay = PdfReader(packet)
-        template = PdfReader(template_path)
-        template.merge_page(overlay.pages[0])
-        writer.add_page(template)
+        c.setFont("Helvetica", 8)
+        c.drawCentredString(386, y_desc, "EA")
+        c.drawCentredString(431, y_desc, str(item.qty))
+        c.drawCentredString(484, y_desc, "0")
+        c.drawCentredString(540, y_desc, str(item.qty))
+    
+    c.save()
+    packet.seek(0)
+    items_pdf = PdfReader(packet)
+    writer.add_page(items_pdf.pages[0])
     
     with open(out_path, 'wb') as f:
         writer.write(f)
