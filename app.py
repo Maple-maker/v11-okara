@@ -1,10 +1,10 @@
 import os
 import tempfile
-from flask import Flask, render_template, request, send_file, flash
+from flask import Flask, render_template, request, send_file
 from dd1750_core import generate_dd1750_from_pdf
 
 app = Flask(__name__)
-app.secret_key = 'dd1750-secret-key-2026'  # Added secret key
+app.secret_key = 'dd1750-key'
 
 @app.route('/')
 def index():
@@ -29,9 +29,7 @@ def generate():
             return send_file(out_path, as_attachment=True, download_name='DD1750.pdf')
             
     except Exception as e:
-        print(f"ERROR: {e}")
         return f"Error: {str(e)}", 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
