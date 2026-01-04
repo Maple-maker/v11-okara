@@ -1,4 +1,4 @@
-"""DD1750 core - Using pdfrw for better form field handling."""
+"""DD1750 core - Final version."""
 
 import io
 import math
@@ -7,19 +7,18 @@ from dataclasses import dataclass
 from typing import List
 
 import pdfplumber
+from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 
 
 PAGE_W, PAGE_H = letter
-
 X_BOX_L, X_BOX_R = 44.0, 88.0
 X_CONTENT_L, X_CONTENT_R = 88.0, 365.0
 X_UOI_L, X_UOI_R = 365.0, 408.5
 X_INIT_L, X_INIT_R = 408.5, 453.5
 X_SPARES_L, X_SPARES_R = 453.5, 514.5
 X_TOTAL_L, X_TOTAL_R = 514.5, 566.0
-
 Y_TABLE_TOP = 616.0
 Y_TABLE_BOTTOM = 89.5
 ROWS_PER_PAGE = 18
@@ -104,8 +103,6 @@ def extract_items_from_pdf(pdf_path: str) -> List[BomItem]:
 
 
 def generate_dd1750_from_pdf(bom_path, template_path, output_path):
-    from pypdf import PdfReader, PdfWriter
-    
     items = extract_items_from_pdf(bom_path)
     
     if not items:
@@ -113,10 +110,7 @@ def generate_dd1750_from_pdf(bom_path, template_path, output_path):
     
     total_pages = math.ceil(len(items) / ROWS_PER_PAGE)
     
-    # Read template
-    template = PdfReader(template_path)
-    template_pages = len(template.pages)
-    first_page = template.pages[0]
+    reader = PdfReader(template_path)
     
     writer = PdfWriter()
     
@@ -125,17 +119,18 @@ def generate_dd1750_from_pdf(bom_path, template_path, output_path):
         end_idx = min((page_num + 1) * ROWS_PER_PAGE, len(items))
         page_items = items[start_idx:end_idx]
         
-        # Get page
-        if page_num < template_pages:
-            page = template.pages[page_num]
-        else:
-            page = first_page
+        page = reader.pages[0]
         
-        # Create items-only overlay
+        # Create overlay with clipping
         packet = io.BytesIO()
         c = canvas.Canvas(packet, pagesize=letter)
         
-        # Only draw items - table area only
+        # Clip to table area only
+        c.beginPath()
+        c.rect(0, 0, PAGE_W, Y_TABLE_TOP)
+        c.clip()
+        
+        # Draw items
         first_row = Y_TABLE_TOP - 5.0
         
         for i, item in enumerate(page_items):
@@ -158,10 +153,7 @@ def generate_dd1750_from_pdf(bom_path, template_path, output_path):
         c.save()
         packet.seek(0)
         
-        # Read overlay
         overlay = PdfReader(packet)
-        
-        # Use merge_page特种
         page.merge_page(overlay.pages[0])
         writer.add_page(page)
     
