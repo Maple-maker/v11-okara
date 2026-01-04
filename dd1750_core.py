@@ -1,4 +1,4 @@
-"""DD1750 core - Only items, no admin overlay."""
+"""DD1750 core - Using pdfrw for better form field handling."""
 
 import io
 import math
@@ -7,14 +7,12 @@ from dataclasses import dataclass
 from typing import List
 
 import pdfplumber
-from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 
 
 PAGE_W, PAGE_H = letter
 
-# Only table area positions
 X_BOX_L, X_BOX_R = 44.0, 88.0
 X_CONTENT_L, X_CONTENT_R = 88.0, 365.0
 X_UOI_L, X_UOI_R = 365.0, 408.5
@@ -22,7 +20,6 @@ X_INIT_L, X_INIT_R = 408.5, 453.5
 X_SPARES_L, X_SPARES_R = 453.5, 514.5
 X_TOTAL_L, X_TOTAL_R = 514.5, 566.0
 
-# Table area only - admin section is ABOVE this line
 Y_TABLE_TOP = 616.0
 Y_TABLE_BOTTOM = 89.5
 ROWS_PER_PAGE = 18
@@ -107,56 +104,51 @@ def extract_items_from_pdf(pdf_path: str) -> List[BomItem]:
 
 
 def generate_dd1750_from_pdf(bom_path, template_path, output_path):
+    from pypdf import PdfReader, PdfWriter
+    
     items = extract_items_from_pdf(bom_path)
     
     if not items:
         return output_path, 0
     
     total_pages = math.ceil(len(items) / ROWS_PER_PAGE)
-    writer = PdfWriter()
     
+    # Read template
     template = PdfReader(template_path)
     template_pages = len(template.pages)
     first_page = template.pages[0]
+    
+    writer = PdfWriter()
     
     for page_num in range(total_pages):
         start_idx = page_num * ROWS_PER_PAGE
         end_idx = min((page_num + 1) * ROWS_PER_PAGE, len(items))
         page_items = items[start_idx:end_idx]
         
-        # Use template page
+        # Get page
         if page_num < template_pages:
             page = template.pages[page_num]
         else:
             page = first_page
         
-        # Create overlay - ONLY for table area
-        # Start drawing at Y_TABLE_TOP and go down
-        # Do NOT draw anything above Y_TABLE_TOP (leave admin section untouched)
+        # Create items-only overlay
         packet = io.BytesIO()
         c = canvas.Canvas(packet, pagesize=letter)
         
-        # Start at the TOP of the table area (Y=616)
-        # NO drawing above this line
+        # Only draw items - table area only
         first_row = Y_TABLE_TOP - 5.0
         
         for i, item in enumerate(page_items):
             y = first_row - (i * ROW_H)
             
-            # Box number
             c.setFont("Helvetica", 8)
             c.drawCentredString(66, y - 7, str(item.line_no))
-            
-            # Description
-            c.setFont("Helvetica", 7)
             c.drawString(92, y - 7, item.description[:50])
             
-            # NSN
             if item.nsn:
                 c.setFont("Helvetica", 6)
                 c.drawString(92, y - 12, f"NSN: {item.nsn}")
             
-            # Quantities
             c.setFont("Helvetica", 8)
             c.drawCentredString(386, y - 7, "EA")
             c.drawCentredString(431, y - 7, str(item.qty))
@@ -166,8 +158,10 @@ def generate_dd1750_from_pdf(bom_path, template_path, output_path):
         c.save()
         packet.seek(0)
         
-        # Merge overlay
+        # Read overlay
         overlay = PdfReader(packet)
+        
+        # Use merge_page特种
         page.merge_page(overlay.pages[0])
         writer.add_page(page)
     
