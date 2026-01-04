@@ -8,17 +8,13 @@
         .container { background: white; padding: 30px; border-radius: 10px; }
         h1 { color: #333; }
         .upload { margin-bottom: 15px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input[type="file"] { width: 100%; }
+        label { display: block; margin-bottom: 5px; }
         button { background: #1976d2; color: white; border: none; padding: 12px 25px; border-radius: 5px; cursor: pointer; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>DD1750 Converter</h1>
-        {% with messages = get_flashed_messages() %}
-            {% if messages %}<p style="color:red">{{ messages[0] }}</p>{% endif %}
-        {% endwith %}
         <form method="POST" action="/generate" enctype="multipart/form-data">
             <div class="upload">
                 <label>BOM PDF</label>
