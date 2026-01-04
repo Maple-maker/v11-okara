@@ -1,31 +1,18 @@
-"""DD1750 core - Complete working version."""
+"""DD1750 core - Template-aware positioning."""
 
 import io
 import math
 import re
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
-from reportlab.pdfbase import pdfmetrics
 from reportlab.lib.pagesizes import letter
 
 
 PAGE_W, PAGE_H = letter
-
-# Admin positions - adjust Y values as needed
-ADMIN_COORDS = {
-    'unit': {'x': 50, 'y': 735},
-    'requisition': {'x': 280, 'y': 735},
-    'page': {'x': 500, 'y': 735},
-    'date': {'x': 50, 'y': 710},
-    'order': {'x': 280, 'y': 710},
-    'boxes': {'x': 480, 'y': 710},
-    'packed_by': {'x': 44, 'y': 115},
-    'received_by': {'x': 300, 'y': 115},
-}
 
 X_BOX_L, X_BOX_R = 44.0, 88.0
 X_CONTENT_L, X_CONTENT_R = 88.0, 365.0
@@ -34,10 +21,10 @@ X_INIT_L, X_INIT_R = 408.5, 453.5
 X_SPARES_L, X_SPARES_R = 453.5, 514.5
 X_TOTAL_L, X_TOTAL_R = 514.5, 566.0
 
-Y_TABLE_TOP_LINE = 616.0
-Y_TABLE_BOTTOM_LINE = 89.5
+Y_TABLE_TOP = 616.0
+Y_TABLE_BOTTOM = 89.5
 ROWS_PER_PAGE = 18
-ROW_H = (Y_TABLE_TOP_LINE - Y_TABLE_BOTTOM_LINE) / ROWS_PER_PAGE
+ROW_H = (Y_TABLE_TOP - Y_TABLE_BOTTOM) / ROWS_PER_PAGE
 PAD_X = 3.0
 
 
@@ -47,6 +34,49 @@ class BomItem:
     description: str
     nsn: str
     qty: int
+
+
+def detect_template_positions(template_path: str) -> Dict:
+    """Detect actual text box positions from the template."""
+    positions = {}
+    
+    try:
+        with pdfplumber.open(template_path) as pdf:
+            page = pdf.pages[0]
+            text = page.extract_text() or ""
+            
+            # Look for text near the top (admin fields)
+            words = page.extract_words()
+            
+            # Find positions of common labels
+            for word in words:
+                word_text = word['text'].upper()
+                x0, y0, x1, y1 = word['x0'], word['top'], word['x1'], word['top']
+                
+                # Find labels and detect their positions
+                if 'REQUISITION' in word_text:
+                    positions['requisition'] = {'x': x1 + 5, 'y': y0}
+                elif 'ORDER' in word_text and 'NO' in word_text:
+                    positions['order'] = {'x': x1 + 5, 'y': y0}
+                elif word_text == 'DATE':
+                    positions['date'] = {'x': x1 + 5, 'y': y0}
+                elif 'BOXES' in word_text:
+                    positions['boxes'] = {'x': x1 + 5, 'y': y0}
+                elif word_text == 'UNIT':
+                    positions['unit'] = {'x': x1 + 5, 'y': y0}
+                elif word_text == 'PAGE':
+                    positions['page'] = {'x': x1 + 5, 'y': y0}
+                elif 'PACKED' in word_text and 'BY' in word_text:
+                    positions['packed_by'] = {'x': x0, 'y': y0}
+                elif 'RECEIVED' in word_text and 'BY' in word_text:
+                    positions['received_by'] = {'x': x0, 'y': y0}
+            
+            print(f"Detected positions: {positions}")
+    
+    except Exception as e:
+        print(f"Error detecting positions: {e}")
+    
+    return positions
 
 
 def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
@@ -62,7 +92,7 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                         continue
                     
                     header = table[0]
-                    lv_idx = desc_idx = mat_idx = qty_idx = None
+                    lv_idx = desc_idx = mat_idx = auth_qty_idx = None
                     
                     for i, cell in enumerate(header):
                         if cell:
@@ -73,8 +103,9 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                                 desc_idx = i
                             elif 'MATERIAL' in text:
                                 mat_idx = i
-                            elif 'AUTH' in text or 'QTY' in text or 'QUANTITY' in text:
-                                qty_idx = i
+                            elif 'AUTH' in text and 'QTY' in text:
+                                auth_qty_idx = i
+                                print(f"Found AUTH QTY column at index {i}")
                     
                     if lv_idx is None or desc_idx is None:
                         continue
@@ -87,6 +118,7 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                         if not lv_cell or str(lv_cell).strip().upper() != 'B':
                             continue
                         
+                        # Get description - second line
                         desc_cell = row[desc_idx] if desc_idx < len(row) else None
                         description = ""
                         if desc_cell:
@@ -94,12 +126,11 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                             description = lines[1].strip() if len(lines) >= 2 else lines[0].strip()
                             if '(' in description:
                                 description = description.split('(')[0].strip()
-                            description = re.sub(r'\s+(WTY|ARC|CIIC|UI|SCMC|EA|AY|9K|9G)$', '', description, flags=re.IGNORECASE)
-                            description = re.sub(r'\s+', ' ', description).strip()
                         
                         if not description:
                             continue
                         
+                        # Get NSN
                         nsn = ""
                         if mat_idx is not None and mat_idx < len(row):
                             mat_cell = row[mat_idx]
@@ -108,34 +139,38 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                                 if match:
                                     nsn = match.group(1)
                         
+                        # Get QTY from AUTH QTY column
                         qty = 1
-                        if qty_idx is not None and qty_idx < len(row):
-                            qty_cell = row[qty_idx]
+                        if auth_qty_idx is not None and auth_qty_idx < len(row):
+                            qty_cell = row[auth_qty_idx]
                             if qty_cell:
                                 qty_text = str(qty_cell).strip()
-                                qty_match = re.search(r'(\d+)', qty_text)
-                                if qty_match:
-                                    qty = int(qty_match.group(1))
+                                print(f"AUTH QTY cell: '{qty_text}'")
+                                match = re.search(r'(\d+)', qty_text)
+                                if match:
+                                    qty = int(match.group(1))
+                                    print(f"  -> Extracted qty: {qty}")
                         
-                        if qty == 1:
-                            parts = description.split()
-                            if parts and parts[-1].isdigit():
-                                qty = int(parts[-1])
-                                description = ' '.join(parts[:-1])
-                        
-                        items.append(BomItem(len(items) + 1, description[:100], nsn, qty))
+                        items.append(BomItem(len(items) + 1, description.strip(), nsn, qty))
     
     except Exception as e:
         print(f"ERROR: {e}")
+        import traceback
+        traceback.print_exc()
     
     return items
 
 
-def generate_dd1750_from_pdf(bom_path, template_path, output_path, start_page=0, admin_data=None):
+def generate_dd1750_from_pdf(bom_path: str, template_path: str, output_path: str, 
+                            start_page: int = 0, admin_data: Dict = None) -> tuple:
     if admin_data is None:
         admin_data = {}
     
+    # Detect template positions
+    positions = detect_template_positions(template_path)
+    
     items = extract_items_from_pdf(bom_path, start_page)
+    print(f"\nItems extracted: {len(items)}")
     
     if not items:
         try:
@@ -158,58 +193,70 @@ def generate_dd1750_from_pdf(bom_path, template_path, output_path, start_page=0,
         
         packet = io.BytesIO()
         c = canvas.Canvas(packet, pagesize=letter)
+        first_row = Y_TABLE_TOP - 5.0
         
-        first_row_top = Y_TABLE_TOP_LINE - 5.0
-        
+        # Draw items
         for i, item in enumerate(page_items):
-            y = first_row_top - (i * ROW_H)
-            y_desc = y - 7.0
-            y_nsn = y - 12.2
+            y = first_row - (i * ROW_H)
             
             c.setFont("Helvetica", 8)
-            c.drawCentredString((X_BOX_L + X_BOX_R) / 2, y_desc, str(item.line_no))
+            c.drawCentredString(66, y - 7, str(item.line_no))
             
             c.setFont("Helvetica", 7)
-            desc = item.description[:50] if len(item.description) > 50 else item.description
-            c.drawString(X_CONTENT_L + PAD_X, y_desc, desc)
+            c.drawString(92, y - 7, item.description[:50])
             
             if item.nsn:
                 c.setFont("Helvetica", 6)
-                c.drawString(X_CONTENT_L + PAD_X, y_nsn, f"NSN: {item.nsn}")
+                c.drawString(92, y - 12, f"NSN: {item.nsn}")
             
             c.setFont("Helvetica", 8)
-            c.drawCentredString((X_UOI_L + X_UOI_R) / 2, y_desc, "EA")
-            c.drawCentredString((X_INIT_L + X_INIT_R) / 2, y_desc, str(item.qty))
-            c.drawCentredString((X_SPARES_L + X_SPARES_R) / 2, y_desc, "0")
-            c.drawCentredString((X_TOTAL_L + X_TOTAL_R) / 2, y_desc, str(item.qty))
+            c.drawCentredString(386, y - 7, "EA")
+            c.drawCentredString(431, y - 7, str(item.qty))
+            c.drawCentredString(484, y - 7, "0")
+            c.drawCentredString(540, y - 7, str(item.qty))
         
-        # Admin fields
-        for key, coords in ADMIN_COORDS.items():
-            if key == 'page' and total_pages <= 1:
-                continue
-            
-            value = None
-            if key == 'requisition' and admin_data.get('requisition_no'):
-                value = f"REQ: {admin_data['requisition_no']}"
-            elif key == 'order' and admin_data.get('order_no'):
-                value = f"ORDER: {admin_data['order_no']}"
-            elif key == 'boxes' and admin_data.get('num_boxes'):
-                value = f"BOXES: {admin_data['num_boxes']}"
-            elif key == 'received_by':
-                value = "RECEIVED BY:"
-            elif admin_data.get(key):
-                value = admin_data[key]
-            
-            if value:
-                c.setFont("Helvetica", 8)
-                c.drawString(coords['x'], coords['y'], str(value)[:30])
-                
-                if key == 'packed_by':
-                    c.setFont("Helvetica", 6)
-                    c.drawString(coords['x'], coords['y'] - 10, "(Signature)")
-                elif key == 'received_by':
-                    c.setFont("Helvetica", 6)
-                    c.drawString(coords['x'], coords['y'] - 10, "(Signature)")
+        # Draw admin fields using detected positions
+        c.setFont("Helvetica", 10)
+        
+        if positions.get('unit') and admin_data.get('unit'):
+            pos = positions['unit']
+            c.drawString(pos['x'], pos['y'], admin_data['unit'][:30])
+        
+        if positions.get('requisition') and admin_data.get('requisition_no'):
+            pos = positions['requisition']
+            c.drawString(pos['x'], pos['y'], f"REQ: {admin_data['requisition_no']}")
+        
+        if positions.get('date') and admin_data.get('date'):
+            pos = positions['date']
+            c.drawString(pos['x'], pos['y'], admin_data['date'])
+        
+        if positions.get('order') and admin_data.get('order_no'):
+            pos = positions['order']
+            c.drawString(pos['x'], pos['y'], f"ORDER: {admin_data['order_no']}")
+        
+        if positions.get('boxes') and admin_data.get('num_boxes'):
+            pos = positions['boxes']
+            c.drawString(pos['x'], pos['y'], admin_data['num_boxes'])
+        
+        if positions.get('page') and total_pages > 1:
+            pos = positions['page']
+            c.setFont("Helvetica", 8)
+            c.drawString(pos['x'], pos['y'], f"{page_num + 1}/{total_pages}")
+        
+        # Bottom section
+        if positions.get('packed_by') and admin_data.get('packed_by'):
+            pos = positions['packed_by']
+            c.setFont("Helvetica", 10)
+            c.drawString(pos['x'], pos['y'], admin_data['packed_by'])
+            c.setFont("Helvetica", 8)
+            c.drawString(pos['x'], pos['y'] - 10, "(Signature)")
+        
+        if positions.get('received_by'):
+            pos = positions['received_by']
+            c.setFont("Helvetica", 10)
+            c.drawString(pos['x'], pos['y'], "RECEIVED BY:")
+            c.setFont("Helvetica", 8)
+            c.drawString(pos['x'], pos['y'] - 10, "(Signature)")
         
         c.save()
         packet.seek(0)
