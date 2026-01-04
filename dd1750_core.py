@@ -1,4 +1,4 @@
-"""DD1750 core - Fixed admin positions and date format."""
+"""DD1750 core - Complete with admin and end item fields."""
 
 import io
 import math
@@ -14,19 +14,25 @@ from reportlab.lib.pagesizes import letter
 
 PAGE_W, PAGE_H = letter
 
-# === ADMIN FIELD POSITIONS (ADJUST AS NEEDED) ===
-# Look at your template and adjust these X, Y values
+# === ADMIN FIELD POSITIONS (from your screenshot) ===
 ADMIN_POS = {
-    # Top section labels - find these labels and position values AFTER them
-    'UNIT': {'label_x': 44, 'value_x': 150, 'y': 745},
-    'REQUISITION': {'label_x': 250, 'value_x': 380, 'y': 745},
-    'PAGE': {'label_x': 500, 'value_x': 535, 'y': 745},
-    'DATE': {'label_x': 44, 'value_x': 150, 'y': 715},
-    'ORDER': {'label_x': 250, 'value_x': 380, 'y': 715},
-    'BOXES': {'label_x': 450, 'value_x': 550, 'y': 715},
-    # Bottom section
-    'PACKED': {'label_x': 44, 'value_x': 150, 'y': 120},
-    'RECEIVED': {'label_x': 300, 'value_x': 420, 'y': 120},
+    # Top section
+    'UNIT': {'x': 120, 'y': 755},           # Unit name
+    'REQ_NO': {'x': 350, 'y': 755},         # Requisition No.
+    'PAGE_NO': {'x': 540, 'y': 755},        # Page number
+    
+    # Second row
+    'DATE': {'x': 120, 'y': 730},           # Date
+    'ORDER_NO': {'x': 350, 'y': 730},       # Order No.
+    'TOTAL_BOXES': {'x': 520, 'y': 730},    # Total No. of Boxes
+    
+    # End item section
+    'END_ITEM': {'x': 120, 'y': 705},       # End Item
+    'MODEL': {'x': 350, 'y': 705},          # Model
+    
+    # Bottom section (on every page)
+    'PACKED_BY': {'x': 50, 'y': 125},       # Packed By
+    'RECEIVED_BY': {'x': 350, 'y': 125},    # Received By
 }
 
 # Table positions
@@ -57,7 +63,6 @@ def format_military_date(date_str: str) -> str:
         return ""
     
     try:
-        # Try parsing various date formats
         for fmt in ['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y', '%Y/%m/%d']:
             try:
                 dt = datetime.strptime(date_str, fmt)
@@ -65,7 +70,6 @@ def format_military_date(date_str: str) -> str:
             except:
                 continue
         
-        # If already in correct format, return as-is
         if re.match(r'^\d{2}[A-Z]{3}\d{4}$', date_str.upper()):
             return date_str.upper()
         
@@ -87,7 +91,7 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                         continue
                     
                     header = table[0]
-                    lv_idx = desc_idx = mat_idx = auth_qty_idx = None
+                    lv_idx = desc_idx = mat_idx = oh_qty_idx = None
                     
                     for i, cell in enumerate(header):
                         if cell:
@@ -98,8 +102,9 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                                 desc_idx = i
                             elif 'MATERIAL' in text:
                                 mat_idx = i
-                            elif 'AUTH' in text and 'QTY' in text:
-                                auth_qty_idx = i
+                            elif 'OH' in text and 'QTY' in text:
+                                oh_qty_idx = i
+                                print(f"Found OH QTY column at index {i}")
                     
                     if lv_idx is None or desc_idx is None:
                         continue
@@ -133,10 +138,10 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                                 if match:
                                     nsn = match.group(1)
                         
-                        # Get QTY from AUTH QTY column
+                        # Get QTY from OH QTY column
                         qty = 1
-                        if auth_qty_idx is not None and auth_qty_idx < len(row):
-                            qty_cell = row[auth_qty_idx]
+                        if oh_qty_idx is not None and oh_qty_idx < len(row):
+                            qty_cell = row[oh_qty_idx]
                             if qty_cell:
                                 qty_text = str(qty_cell).strip()
                                 match = re.search(r'(\d+)', qty_text)
@@ -156,12 +161,12 @@ def generate_dd1750_from_pdf(bom_path: str, template_path: str, output_path: str
     if admin_data is None:
         admin_data = {}
     
-    # Format date to military format
+    # Format date
     if admin_data.get('date'):
         admin_data['date'] = format_military_date(admin_data['date'])
     
     items = extract_items_from_pdf(bom_path, start_page)
-    print(f"Items: {len(items)}, Date format: {admin_data.get('date')}")
+    print(f"Items: {len(items)}")
     
     if not items:
         try:
@@ -209,47 +214,52 @@ def generate_dd1750_from_pdf(bom_path: str, template_path: str, output_path: str
         # === DRAW ADMIN FIELDS ===
         c.setFont("Helvetica", 10)
         
-        # UNIT (top left)
+        # UNIT
         if admin_data.get('unit'):
-            c.drawString(ADMIN_POS['UNIT']['value_x'], ADMIN_POS['UNIT']['y'], admin_data['unit'][:25])
+            c.drawString(ADMIN_POS['UNIT']['x'], ADMIN_POS['UNIT']['y'], admin_data['unit'][:30])
         
         # REQUISITION NO.
         if admin_data.get('requisition_no'):
-            c.drawString(ADMIN_POS['REQUISITION']['value_x'], ADMIN_POS['REQUISITION']['y'], 
-                        f"REQ: {admin_data['requisition_no']}")
+            c.drawString(ADMIN_POS['REQ_NO']['x'], ADMIN_POS['REQ_NO']['y'], admin_data['requisition_no'])
         
         # PAGE
         if total_pages > 1:
             c.setFont("Helvetica", 8)
-            c.drawString(ADMIN_POS['PAGE']['value_x'], ADMIN_POS['PAGE']['y'], 
-                        f"{page_num + 1}/{total_pages}")
+            c.drawString(ADMIN_POS['PAGE_NO']['x'], ADMIN_POS['PAGE_NO']['y'], f"{page_num + 1}/{total_pages}")
         
-        # DATE (military format)
+        # DATE
         if admin_data.get('date'):
             c.setFont("Helvetica", 10)
-            c.drawString(ADMIN_POS['DATE']['value_x'], ADMIN_POS['DATE']['y'], admin_data['date'])
+            c.drawString(ADMIN_POS['DATE']['x'], ADMIN_POS['DATE']['y'], admin_data['date'])
         
         # ORDER NO.
         if admin_data.get('order_no'):
-            c.drawString(ADMIN_POS['ORDER']['value_x'], ADMIN_POS['ORDER']['y'],
-                        f"ORDER: {admin_data['order_no']}")
+            c.drawString(ADMIN_POS['ORDER_NO']['x'], ADMIN_POS['ORDER_NO']['y'], admin_data['order_no'])
         
         # TOTAL NO. OF BOXES
         if admin_data.get('num_boxes'):
-            c.drawString(ADMIN_POS['BOXES']['value_x'], ADMIN_POS['BOXES']['y'], admin_data['num_boxes'])
+            c.drawString(ADMIN_POS['TOTAL_BOXES']['x'], ADMIN_POS['TOTAL_BOXES']['y'], admin_data['num_boxes'])
         
-        # PACKED BY (bottom section - every page)
+        # END ITEM
+        if admin_data.get('end_item'):
+            c.drawString(ADMIN_POS['END_ITEM']['x'], ADMIN_POS['END_ITEM']['y'], admin_data['end_item'])
+        
+        # MODEL
+        if admin_data.get('model'):
+            c.drawString(ADMIN_POS['MODEL']['x'], ADMIN_POS['MODEL']['y'], admin_data['model'])
+        
+        # PACKED BY (bottom - every page)
         if admin_data.get('packed_by'):
             c.setFont("Helvetica", 10)
-            c.drawString(ADMIN_POS['PACKED']['value_x'], ADMIN_POS['PACKED']['y'], admin_data['packed_by'])
+            c.drawString(ADMIN_POS['PACKED_BY']['x'], ADMIN_POS['PACKED_BY']['y'], admin_data['packed_by'])
             c.setFont("Helvetica", 8)
-            c.drawString(ADMIN_POS['PACKED']['value_x'], ADMIN_POS['PACKED']['y'] - 10, "(Signature)")
+            c.drawString(ADMIN_POS['PACKED_BY']['x'], ADMIN_POS['PACKED_BY']['y'] - 10, "(Signature)")
         
-        # RECEIVED BY (bottom section - every page)
+        # RECEIVED BY (bottom - every page)
         c.setFont("Helvetica", 10)
-        c.drawString(ADMIN_POS['RECEIVED']['value_x'], ADMIN_POS['RECEIVED']['y'], "RECEIVED BY:")
+        c.drawString(ADMIN_POS['RECEIVED_BY']['x'], ADMIN_POS['RECEIVED_BY']['y'], "RECEIVED BY:")
         c.setFont("Helvetica", 8)
-        c.drawString(ADMIN_POS['RECEIVED']['value_x'], ADMIN_POS['RECEIVED']['y'] - 10, "(Signature)")
+        c.drawString(ADMIN_POS['RECEIVED_BY']['x'], ADMIN_POS['RECEIVED_BY']['y'] - 10, "(Signature)")
         
         c.save()
         packet.seek(0)
