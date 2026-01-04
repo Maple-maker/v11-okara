@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DD1750 Converter - Fixed Version</title>
+    <title>DD1750 Converter - Inspection Ready</title>
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 800px;
+            max-width: 900px;
             margin: 0 auto;
             padding: 20px;
             background: #f5f5f5;
@@ -26,138 +26,52 @@
             color: #666;
             margin-bottom: 30px;
         }
-        .fixes {
+        .admin-section {
             background: #e8f4fd;
-            padding: 15px;
-            border-radius: 5px;
+            padding: 20px;
+            border-radius: 8px;
             margin-bottom: 20px;
             border-left: 4px solid #3498db;
         }
-        .fixes h3 {
+        .admin-section h3 {
             margin-top: 0;
             color: #2c3e50;
         }
-        .fixes ul {
-            margin: 10px 0;
-            padding-left: 20px;
+        .admin-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
         }
-        .fixes li {
-            margin-bottom: 5px;
-        }
-        .upload-section {
-            margin-bottom: 25px;
+        .form-group {
+            margin-bottom: 15px;
         }
         label {
             display: block;
-            margin-bottom: 8px;
+            margin-bottom: 5px;
             font-weight: bold;
             color: #333;
+        }
+        input[type="text"], input[type="number"], input[type="date"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .upload-section {
+            margin-bottom: 25px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .upload-section label {
+            margin-bottom: 10px;
         }
         input[type="file"] {
             width: 100%;
             padding: 10px;
             border: 2px dashed #ddd;
             border-radius: 5px;
-            background: #f9f9f9;
             cursor: pointer;
-        }
-        input[type="file"]:hover {
-            border-color: #3498db;
-        }
-        input[type="number"] {
-            width: 100px;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        .file-info {
-            margin-top: 5px;
-            font-size: 14px;
-            color: #27ae60;
-        }
-        button {
-            background: #3498db;
-            color: white;
-            border: none;
-            padding: 12px 30px;
-            border-radius: 5px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-        button:hover {
-            background: #2980b9;
-        }
-        .flash-messages {
-            margin-bottom: 20px;
-        }
-        .flash {
-            padding: 12px;
-            border-radius: 5px;
-            margin-bottom: 10px;
-        }
-        .flash.error {
-            background: #fee;
-            color: #c33;
-            border: 1px solid #fcc;
-        }
-        .flash.success {
-            background: #efe;
-            color: #3c3;
-            border: 1px solid #cfc;
         }
         .hint {
-            font-size: 14px;
-            color: #7f8c8d;
-            margin-top: 5px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>DD1750 Converter - Fixed Version</h1>
-        <p class="subtitle">Convert BOM PDFs to DD1750 forms with all bugs fixed</p>
-        
-        <div class="fixes">
-            <h3>✅ Fixed Issues:</h3>
-            <ul>
-                <li><strong>18 items per page</strong> (was 40 - wrong)</li>
-                <li><strong>Correct NSN assignment</strong> (Item 1 gets its own NSN, not Item 2's)</li>
-                <li><strong>Clean descriptions</strong> (removes material IDs like C_75Q65)</li>
-            </ul>
-        </div>
-        
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                <div class="flash-messages">
-                    {% for category, message in messages %}
-                        <div class="flash {{ category }}">{{ message }}</div>
-                    {% endfor %}
-                </div>
-            {% endif %}
-        {% endwith %}
-        
-        <form method="POST" action="/generate" enctype="multipart/form-data">
-            <div class="upload-section">
-                <label for="bom_file">BOM PDF File</label>
-                <input type="file" id="bom_file" name="bom_file" accept=".pdf" required>
-                <div class="hint">Upload your BOM PDF (like B49.pdf)</div>
-            </div>
-            
-            <div class="upload-section">
-                <label for="template_file">DD1750 Template PDF</label>
-                <input type="file" id="template_file" name="template_file" accept=".pdf" required>
-                <div class="hint">Upload your blank DD1750 template PDF</div>
-            </div>
-            
-            <div class="upload-section">
-                <label for="start_page">Start Page (if BOM has cover sheet)</label>
-                <input type="number" id="start_page" name="start_page" value="0" min="0">
-                <div class="hint">Use 0 for normal BOMs. If your BOM has a cover sheet, try 1.</div>
-            </div>
-            
-            <button type="submit">Generate DD1750</button>
-        </form>
-    </div>
-</body>
-</html>
