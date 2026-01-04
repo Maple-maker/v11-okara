@@ -1,10 +1,10 @@
-"""DD1750 core - Complete with admin and end item fields."""
+"""DD1750 core - Auto-detect positions from template."""
 
 import io
 import math
 import re
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
@@ -14,28 +14,6 @@ from reportlab.lib.pagesizes import letter
 
 PAGE_W, PAGE_H = letter
 
-# === ADMIN FIELD POSITIONS (from your screenshot) ===
-ADMIN_POS = {
-    # Top section
-    'UNIT': {'x': 120, 'y': 755},           # Unit name
-    'REQ_NO': {'x': 350, 'y': 755},         # Requisition No.
-    'PAGE_NO': {'x': 540, 'y': 755},        # Page number
-    
-    # Second row
-    'DATE': {'x': 120, 'y': 730},           # Date
-    'ORDER_NO': {'x': 350, 'y': 730},       # Order No.
-    'TOTAL_BOXES': {'x': 520, 'y': 730},    # Total No. of Boxes
-    
-    # End item section
-    'END_ITEM': {'x': 120, 'y': 705},       # End Item
-    'MODEL': {'x': 350, 'y': 705},          # Model
-    
-    # Bottom section (on every page)
-    'PACKED_BY': {'x': 50, 'y': 125},       # Packed By
-    'RECEIVED_BY': {'x': 350, 'y': 125},    # Received By
-}
-
-# Table positions
 X_BOX_L, X_BOX_R = 44.0, 88.0
 X_CONTENT_L, X_CONTENT_R = 88.0, 365.0
 X_UOI_L, X_UOI_R = 365.0, 408.5
@@ -57,22 +35,61 @@ class BomItem:
     qty: int
 
 
+def detect_admin_positions(template_path: str) -> Dict:
+    """Auto-detect admin field positions from template."""
+    positions = {}
+    
+    try:
+        with pdfplumber.open(template_path) as pdf:
+            page = pdf.pages[0]
+            words = page.extract_words()
+            
+            for word in words:
+                text = word['text'].upper()
+                x0, x1 = word['x0'], word['x1']
+                y = word['top']
+                
+                # Find labels and store position AFTER them
+                if 'REQUISITION' in text and 'NO' not in text:
+                    positions['requisition'] = {'x': x1 + 5, 'y': y}
+                elif 'ORDER' in text and 'NO' in text:
+                    positions['order'] = {'x': x1 + 5, 'y': y}
+                elif text == 'DATE':
+                    positions['date'] = {'x': x1 + 5, 'y': y}
+                elif 'BOXES' in text:
+                    positions['boxes'] = {'x': x1 + 5, 'y': y}
+                elif 'UNIT' in text:
+                    positions['unit'] = {'x': x1 + 5, 'y': y}
+                elif 'PAGE' in text:
+                    positions['page'] = {'x': x1 + 5, 'y': y}
+                elif 'PACKED' in text and 'BY' in text:
+                    positions['packed'] = {'x': x0, 'y': y}
+                elif 'RECEIVED' in text and 'BY' in text:
+                    positions['received'] = {'x': x0, 'y': y}
+                elif 'END' in text and 'ITEM' in text:
+                    positions['end_item'] = {'x': x1 + 5, 'y': y}
+                elif 'MODEL' in text:
+                    positions['model'] = {'x': x1 + 5, 'y': y}
+    
+    except Exception as e:
+        print(f"Error detecting positions: {e}")
+    
+    print(f"Detected positions: {positions}")
+    return positions
+
+
 def format_military_date(date_str: str) -> str:
-    """Convert date to military format DDMONYYYY (ex: 04JAN2026)."""
+    """Convert date to DDMONYYYY format."""
     if not date_str:
         return ""
     
     try:
-        for fmt in ['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y', '%Y/%m/%d']:
+        for fmt in ['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y']:
             try:
                 dt = datetime.strptime(date_str, fmt)
                 return dt.strftime('%d%b%Y').upper()
             except:
                 continue
-        
-        if re.match(r'^\d{2}[A-Z]{3}\d{4}$', date_str.upper()):
-            return date_str.upper()
-        
         return date_str
     except:
         return date_str
@@ -91,7 +108,7 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                         continue
                     
                     header = table[0]
-                    lv_idx = desc_idx = mat_idx = oh_qty_idx = None
+                    lv_idx = desc_idx = mat_idx = qty_idx = None
                     
                     for i, cell in enumerate(header):
                         if cell:
@@ -102,9 +119,8 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                                 desc_idx = i
                             elif 'MATERIAL' in text:
                                 mat_idx = i
-                            elif 'OH' in text and 'QTY' in text:
-                                oh_qty_idx = i
-                                print(f"Found OH QTY column at index {i}")
+                            elif 'AUTH' in text and 'QTY' in text:
+                                qty_idx = i
                     
                     if lv_idx is None or desc_idx is None:
                         continue
@@ -117,7 +133,7 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                         if not lv_cell or str(lv_cell).strip().upper() != 'B':
                             continue
                         
-                        # Get description - second line
+                        # Description
                         desc_cell = row[desc_idx] if desc_idx < len(row) else None
                         description = ""
                         if desc_cell:
@@ -129,7 +145,7 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                         if not description:
                             continue
                         
-                        # Get NSN
+                        # NSN
                         nsn = ""
                         if mat_idx is not None and mat_idx < len(row):
                             mat_cell = row[mat_idx]
@@ -138,10 +154,10 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                                 if match:
                                     nsn = match.group(1)
                         
-                        # Get QTY from OH QTY column
+                        # QTY from AUTH QTY column
                         qty = 1
-                        if oh_qty_idx is not None and oh_qty_idx < len(row):
-                            qty_cell = row[oh_qty_idx]
+                        if qty_idx is not None and qty_idx < len(row):
+                            qty_cell = row[qty_idx]
                             if qty_cell:
                                 qty_text = str(qty_cell).strip()
                                 match = re.search(r'(\d+)', qty_text)
@@ -165,8 +181,11 @@ def generate_dd1750_from_pdf(bom_path: str, template_path: str, output_path: str
     if admin_data.get('date'):
         admin_data['date'] = format_military_date(admin_data['date'])
     
+    # Detect positions from template
+    positions = detect_admin_positions(template_path)
+    
     items = extract_items_from_pdf(bom_path, start_page)
-    print(f"Items: {len(items)}")
+    print(f"Items: {len(items)}, Positions: {positions}")
     
     if not items:
         try:
@@ -211,55 +230,46 @@ def generate_dd1750_from_pdf(bom_path: str, template_path: str, output_path: str
             c.drawCentredString(484, y - 7, "0")
             c.drawCentredString(540, y - 7, str(item.qty))
         
-        # === DRAW ADMIN FIELDS ===
+        # Draw admin using detected positions
         c.setFont("Helvetica", 10)
         
-        # UNIT
-        if admin_data.get('unit'):
-            c.drawString(ADMIN_POS['UNIT']['x'], ADMIN_POS['UNIT']['y'], admin_data['unit'][:30])
+        if positions.get('unit') and admin_data.get('unit'):
+            c.drawString(positions['unit']['x'], positions['unit']['y'], admin_data['unit'][:30])
         
-        # REQUISITION NO.
-        if admin_data.get('requisition_no'):
-            c.drawString(ADMIN_POS['REQ_NO']['x'], ADMIN_POS['REQ_NO']['y'], admin_data['requisition_no'])
+        if positions.get('requisition') and admin_data.get('requisition_no'):
+            c.drawString(positions['requisition']['x'], positions['requisition']['y'], admin_data['requisition_no'])
         
-        # PAGE
-        if total_pages > 1:
+        if positions.get('date') and admin_data.get('date'):
+            c.drawString(positions['date']['x'], positions['date']['y'], admin_data['date'])
+        
+        if positions.get('order') and admin_data.get('order_no'):
+            c.drawString(positions['order']['x'], positions['order']['y'], admin_data['order_no'])
+        
+        if positions.get('boxes') and admin_data.get('num_boxes'):
+            c.drawString(positions['boxes']['x'], positions['boxes']['y'], admin_data['num_boxes'])
+        
+        if positions.get('end_item') and admin_data.get('end_item'):
+            c.drawString(positions['end_item']['x'], positions['end_item']['y'], admin_data['end_item'])
+        
+        if positions.get('model') and admin_data.get('model'):
+            c.drawString(positions['model']['x'], positions['model']['y'], admin_data['model'])
+        
+        if positions.get('page') and total_pages > 1:
             c.setFont("Helvetica", 8)
-            c.drawString(ADMIN_POS['PAGE_NO']['x'], ADMIN_POS['PAGE_NO']['y'], f"{page_num + 1}/{total_pages}")
+            c.drawString(positions['page']['x'], positions['page']['y'], f"{page_num + 1}/{total_pages}")
         
-        # DATE
-        if admin_data.get('date'):
+        # Bottom section
+        if positions.get('packed') and admin_data.get('packed_by'):
             c.setFont("Helvetica", 10)
-            c.drawString(ADMIN_POS['DATE']['x'], ADMIN_POS['DATE']['y'], admin_data['date'])
-        
-        # ORDER NO.
-        if admin_data.get('order_no'):
-            c.drawString(ADMIN_POS['ORDER_NO']['x'], ADMIN_POS['ORDER_NO']['y'], admin_data['order_no'])
-        
-        # TOTAL NO. OF BOXES
-        if admin_data.get('num_boxes'):
-            c.drawString(ADMIN_POS['TOTAL_BOXES']['x'], ADMIN_POS['TOTAL_BOXES']['y'], admin_data['num_boxes'])
-        
-        # END ITEM
-        if admin_data.get('end_item'):
-            c.drawString(ADMIN_POS['END_ITEM']['x'], ADMIN_POS['END_ITEM']['y'], admin_data['end_item'])
-        
-        # MODEL
-        if admin_data.get('model'):
-            c.drawString(ADMIN_POS['MODEL']['x'], ADMIN_POS['MODEL']['y'], admin_data['model'])
-        
-        # PACKED BY (bottom - every page)
-        if admin_data.get('packed_by'):
-            c.setFont("Helvetica", 10)
-            c.drawString(ADMIN_POS['PACKED_BY']['x'], ADMIN_POS['PACKED_BY']['y'], admin_data['packed_by'])
+            c.drawString(positions['packed']['x'], positions['packed']['y'], admin_data['packed_by'])
             c.setFont("Helvetica", 8)
-            c.drawString(ADMIN_POS['PACKED_BY']['x'], ADMIN_POS['PACKED_BY']['y'] - 10, "(Signature)")
+            c.drawString(positions['packed']['x'], positions['packed']['y'] - 10, "(Signature)")
         
-        # RECEIVED BY (bottom - every page)
-        c.setFont("Helvetica", 10)
-        c.drawString(ADMIN_POS['RECEIVED_BY']['x'], ADMIN_POS['RECEIVED_BY']['y'], "RECEIVED BY:")
-        c.setFont("Helvetica", 8)
-        c.drawString(ADMIN_POS['RECEIVED_BY']['x'], ADMIN_POS['RECEIVED_BY']['y'] - 10, "(Signature)")
+        if positions.get('received'):
+            c.setFont("Helvetica", 10)
+            c.drawString(positions['received']['x'], positions['received']['y'], "RECEIVED BY:")
+            c.setFont("Helvetica", 8)
+            c.drawString(positions['received']['x'], positions['received']['y'] - 10, "(Signature)")
         
         c.save()
         packet.seek(0)
