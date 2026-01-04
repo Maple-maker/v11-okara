@@ -4,50 +4,43 @@
     <meta charset="UTF-8">
     <title>DD1750 Converter</title>
     <style>
-        body { font-family: Arial; max-width: 800px; margin: 20px auto; padding: 20px; background: #f5f5f5; }
+        body { font-family: Arial; max-width: 700px; margin: 20px auto; padding: 20px; background: #f5f5f5; }
         .container { background: white; padding: 30px; border-radius: 10px; }
         h1 { color: #333; }
-        .section { background: #e3f2fd; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-        .section h3 { margin-top: 0; color: #1565c0; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
         .upload { margin-bottom: 20px; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
-        input[type="file"] { border: 2px dashed #ccc; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="file"] { border: 2px dashed #ccc; padding: 10px; width: 100%; }
         button { background: #1976d2; color: white; border: none; padding: 15px 30px; border-radius: 5px; font-size: 16px; cursor: pointer; }
         .flash { padding: 10px; background: #ffebee; color: #c62828; border-radius: 4px; margin-bottom: 15px; }
+        .note { background: #fff3cd; padding: 15px; border-radius: 5px; margin-bottom: 20px; color: #856404; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>DD1750 Converter</h1>
         
+        <div class="note">
+            <strong>How to use:</strong>
+            <ol style="margin: 10px 0 0 20px;">
+                <li>Upload your BOM PDF</li>
+                <li>Upload your blank DD1750 template PDF</li>
+                <li>Click Generate</li>
+                <li><strong>Manually fill in the admin fields</strong> on each page using your PDF editor</li>
+            </ol>
+        </div>
+        
         {% with messages = get_flashed_messages() %}
             {% if messages %}<div class="flash">{{ messages[0] }}</div>{% endif %}
         {% endwith %}
         
         <form method="POST" action="/generate" enctype="multipart/form-data">
-            <div class="section">
-                <h3>Admin Info</h3>
-                <div class="grid">
-                    <div><label>Unit</label><input type="text" name="unit"></div>
-                    <div><label>Packed By</label><input type="text" name="packed_by"></div>
-                    <div><label>Date</label><input type="text" name="date" value="{{ date }}"></div>
-                    <div><label>Requisition No.</label><input type="text" name="requisition_no"></div>
-                    <div><label>Order No.</label><input type="text" name="order_no"></div>
-                    <div><label>No. of Boxes</label><input type="text" name="num_boxes"></div>
-                    <div><label>End Item</label><input type="text" name="end_item"></div>
-                    <div><label>Model</label><input type="text" name="model"></div>
-                </div>
-            </div>
-            
             <div class="upload">
                 <label>BOM PDF</label>
                 <input type="file" name="bom_file" accept=".pdf" required>
             </div>
             
             <div class="upload">
-                <label>DD1750 Template PDF</label>
+                <label>DD1750 Template PDF (with fillable admin fields)</label>
                 <input type="file" name="template_file" accept=".pdf" required>
             </div>
             
