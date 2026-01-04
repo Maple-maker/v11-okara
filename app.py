@@ -34,17 +34,9 @@ def generate():
     
     try:
         start_page = int(request.form.get('start_page', 0))
-   # In the admin_data section, add:
-admin_data = {
-    'unit': request.form.get('unit', '').strip(),
-    'packed_by': request.form.get('packed_by', '').strip(),
-    'num_boxes': request.form.get('num_boxes', '').strip(),
-    'requisition_no': request.form.get('requisition_no', '').strip(),
-    'order_no': request.form.get('order_no', '').strip(),
-    'date': request.form.get('date', datetime.now().strftime('%Y-%m-%d')).strip(),
-}
-     
+        
         admin_data = {
+            'unit': request.form.get('unit', '').strip(),
             'packed_by': request.form.get('packed_by', '').strip(),
             'num_boxes': request.form.get('num_boxes', '').strip(),
             'requisition_no': request.form.get('requisition_no', '').strip(),
