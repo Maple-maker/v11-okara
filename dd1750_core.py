@@ -1,4 +1,4 @@
-"""DD1750 core - Handle multi-page BOMs and text wrapping correctly."""
+"""DD1750 core - Extract text aligned with 'B' in LV column."""
 
 import io
 import math
@@ -39,186 +39,203 @@ class BomItem:
 
 
 def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
-    """Extract items handling text wrapping and multi-page BOMs."""
+    """Extract items using text positioning to get middle text aligned with 'B'."""
     items = []
     
     try:
         with pdfplumber.open(pdf_path) as pdf:
-            # Process all pages
             for page_num, page in enumerate(pdf.pages[start_page:], start=start_page):
-                print(f"Processing page {page_num}")
+                print(f"\n=== Processing page {page_num} ===")
                 
-                # Extract tables if possible (most reliable)
-                tables = page.extract_tables()
+                # Get all text with positions
+                words = page.extract_words(extra_attrs=["fontname", "size"])
                 
-                if tables and len(tables) > 0:
-                    print(f"  Found {len(tables)} tables")
+                if not words:
+                    print("  No words found on page")
+                    continue
+                
+                # Group words by their y-position (rounded to nearest 0.5 for tolerance)
+                y_groups = {}
+                for word in words:
+                    y = round(word['top'] * 2) / 2  # Round to nearest 0.5
+                    if y not in y_groups:
+                        y_groups[y] = []
+                    y_groups[y].append(word)
+                
+                # Sort y positions from top to bottom
+                sorted_y = sorted(y_groups.keys())
+                
+                # Find all "B" characters and their y-positions
+                b_positions = []
+                for y in sorted_y:
+                    for word in y_groups[y]:
+                        if word['text'].upper() == 'B':
+                            b_positions.append({
+                                'y': y,
+                                'x': word['x0'],
+                                'text': word['text']
+                            })
+                
+                print(f"  Found {len(b_positions)} 'B' characters")
+                
+                # For each "B", find text at similar y-position (aligned horizontally)
+                for b_idx, b_pos in enumerate(b_positions):
+                    b_y = b_pos['y']
                     
-                    for table_idx, table in enumerate(tables):
-                        if len(table) < 2:
-                            continue
+                    # Look for text at similar y-position (±1.0 tolerance)
+                    aligned_texts = []
+                    for y in sorted_y:
+                        if abs(y - b_y) <= 1.0:  # Same horizontal line
+                            # Sort words on this line by x-position
+                            line_words = sorted(y_groups[y], key=lambda w: w['x0'])
+                            for word in line_words:
+                                # Skip the "B" itself and material codes
+                                if word['text'].upper() == 'B':
+                                    continue
+                                if re.match(r'^\d{9}$', word['text']):  # Skip NSNs
+                                    continue
+                                if re.match(r'^C_[A-Z0-9]+$', word['text']):  # Skip material IDs
+                                    continue
+                                if word['text'] in ['WTY', 'ARC', 'CIIC', 'UI', 'SCMC', 'EA', 'AY', '9K', '9G']:
+                                    continue
+                                
+                                aligned_texts.append(word['text'])
+                    
+                    # Join aligned texts to form description
+                    if aligned_texts:
+                        description = ' '.join(aligned_texts)
                         
-                        # Find column indices
-                        header = table[0]
-                        col_indices = {}
+                        # Clean up the description
+                        # Remove any parenthetical text
+                        if '(' in description:
+                            description = description.split('(')[0].strip()
                         
-                        for idx, cell in enumerate(header):
-                            if cell:
-                                cell_text = str(cell).strip().upper()
-                                if 'LV' in cell_text or 'LEVEL' in cell_text:
-                                    col_indices['lv'] = idx
-                                elif 'DESCRIPTION' in cell_text:
-                                    col_indices['desc'] = idx
-                                elif 'MATERIAL' in cell_text:
-                                    col_indices['material'] = idx
-                                elif 'QTY' in cell_text or 'QUANTITY' in cell_text:
-                                    col_indices['qty'] = idx
+                        # Remove trailing codes
+                        description = re.sub(r'\b(WTY|ARC|CIIC|UI|SCMC|EA|AY|9K|9G)\b$', '', description, flags=re.IGNORECASE)
+                        description = re.sub(r'\s+', ' ', description).strip()
                         
-                        print(f"  Table {table_idx}: Found columns {col_indices}")
+                        # Look for NSN near this "B" position
+                        nsn = ""
+                        # Check words slightly above and below the "B"
+                        for y in sorted_y:
+                            if abs(y - b_y) <= 3.0:  # Check within 3 units vertically
+                                for word in y_groups[y]:
+                                    if re.match(r'^\d{9}$', word['text']):
+                                        nsn = word['text']
+                                        break
+                            if nsn:
+                                break
                         
-                        # Process each row
-                        current_item = None
-                        for row_idx, row in enumerate(table[1:], start=1):
-                            # Skip empty rows
-                            if not any(cell for cell in row):
+                        # Look for quantity (usually a number at the end of the line)
+                        qty = 1
+                        for y in sorted_y:
+                            if abs(y - b_y) <= 1.5:
+                                for word in y_groups[y]:
+                                    if word['text'].isdigit() and 1 <= int(word['text']) <= 100:
+                                        qty = int(word['text'])
+                                        break
+                            if qty != 1:
+                                break
+                        
+                        if description and len(description) > 2:
+                            items.append(BomItem(
+                                line_no=len(items) + 1,
+                                description=description[:100],
+                                nsn=nsn,
+                                qty=qty
+                            ))
+                            print(f"  Item {len(items)}: '{description[:40]}...' | NSN: {nsn} | Qty: {qty}")
+                
+                # If position-based extraction didn't find enough items, fall back to table extraction
+                if len(items) == 0 or (page_num == start_page and len(items) < 5):
+                    print("  Falling back to table extraction")
+                    tables = page.extract_tables()
+                    
+                    if tables:
+                        for table in tables:
+                            if len(table) < 2:
                                 continue
                             
-                            # Check if this is an LV = 'B' row
-                            is_b_row = False
-                            if 'lv' in col_indices and len(row) > col_indices['lv']:
-                                lv_cell = row[col_indices['lv']]
-                                if lv_cell and str(lv_cell).strip().upper() == 'B':
-                                    is_b_row = True
+                            # Find column indices
+                            header = table[0]
+                            col_indices = {}
                             
-                            if is_b_row:
-                                # Extract description
-                                description = ""
-                                if 'desc' in col_indices and len(row) > col_indices['desc']:
-                                    desc_cell = row[col_indices['desc']]
-                                    if desc_cell:
-                                        description = str(desc_cell).strip()
-                                        # Only take text before colon or parenthesis
-                                        if ':' in description:
-                                            description = description.split(':')[0].strip()
-                                        if '(' in description:
-                                            description = description.split('(')[0].strip()
-                                        description = re.sub(r'\s+', ' ', description).strip()
-                                
-                                # Extract NSN from Material column
-                                nsn = ""
-                                if 'material' in col_indices and len(row) > col_indices['material']:
-                                    material_cell = row[col_indices['material']]
-                                    if material_cell:
-                                        material_text = str(material_cell).strip()
-                                        # Look for 9-digit NSN
-                                        nsn_match = re.search(r'\b(\d{9})\b', material_text)
-                                        if nsn_match:
-                                            nsn = nsn_match.group(1)
-                                
-                                # Extract quantity
-                                qty = 1
-                                if 'qty' in col_indices and len(row) > col_indices['qty']:
-                                    qty_cell = row[col_indices['qty']]
-                                    if qty_cell:
-                                        try:
-                                            qty = int(str(qty_cell).strip())
-                                        except:
-                                            qty = 1
-                                
-                                if description:
-                                    items.append(BomItem(
-                                        line_no=len(items) + 1,
-                                        description=description[:100],
-                                        nsn=nsn,
-                                        qty=qty
-                                    ))
-                                    print(f"    Added item {len(items)}: {description[:30]}... | NSN: {nsn}")
-                
-                # If no tables found or no items extracted, try text extraction
-                if not items:
-                    print("  No tables found, trying text extraction")
-                    text = page.extract_text() or ""
-                    lines = [ln.strip() for ln in text.split('\n') if ln.strip()]
-                    
-                    i = 0
-                    while i < len(lines):
-                        line = lines[i]
-                        
-                        # Look for patterns that indicate an item row
-                        # Pattern 1: Starts with NSN then B then description
-                        nsn_b_match = re.match(r'^(\d{9})\s+B\s+(.+)$', line)
-                        if nsn_b_match:
-                            nsn = nsn_b_match.group(1)
-                            description = nsn_b_match.group(2)
+                            for idx, cell in enumerate(header):
+                                if cell:
+                                    cell_text = str(cell).strip().upper()
+                                    if 'LV' in cell_text or 'LEVEL' in cell_text:
+                                        col_indices['lv'] = idx
+                                    elif 'DESCRIPTION' in cell_text:
+                                        col_indices['desc'] = idx
+                                    elif 'MATERIAL' in cell_text:
+                                        col_indices['material'] = idx
+                                    elif 'QTY' in cell_text or 'QUANTITY' in cell_text:
+                                        col_indices['qty'] = idx
                             
-                            # Clean description
-                            if ':' in description:
-                                description = description.split(':')[0].strip()
-                            if '(' in description:
-                                description = description.split('(')[0].strip()
-                            description = re.sub(r'\s+', ' ', description).strip()
-                            
-                            # Extract quantity
-                            qty = 1
-                            if description and description.split()[-1].isdigit():
-                                qty = int(description.split()[-1])
-                                description = ' '.join(description.split()[:-1])
-                            
-                            if description:
-                                items.append(BomItem(
-                                    line_no=len(items) + 1,
-                                    description=description[:100],
-                                    nsn=nsn,
-                                    qty=qty
-                                ))
-                                print(f"    Added item {len(items)} (pattern 1): {description[:30]}...")
-                        
-                        # Pattern 2: Line with B and comma (description)
-                        elif ' B ' in line and ',' in line:
-                            parts = line.split()
-                            if 'B' in parts:
-                                b_index = parts.index('B')
-                                
-                                # Check for NSN before B
-                                nsn = ""
-                                if b_index > 0 and re.match(r'^\d{9}$', parts[b_index - 1]):
-                                    nsn = parts[b_index - 1]
-                                
-                                # Get description after B
-                                desc_parts = parts[b_index + 1:]
-                                description = ' '.join(desc_parts)
-                                
-                                # Clean description
-                                if ':' in description:
-                                    description = description.split(':')[0].strip()
-                                if '(' in description:
-                                    description = description.split('(')[0].strip()
-                                description = re.sub(r'\s+', ' ', description).strip()
-                                
-                                # Extract quantity
-                                qty = 1
-                                if description and description.split()[-1].isdigit():
-                                    qty = int(description.split()[-1])
-                                    description = ' '.join(description.split()[:-1])
-                                
-                                # If no NSN found, check nearby lines
-                                if not nsn:
-                                    for j in range(max(0, i-3), min(len(lines), i+3)):
-                                        nsn_match = re.search(r'\b(\d{9})\b', lines[j])
-                                        if nsn_match:
-                                            nsn = nsn_match.group(1)
-                                            break
-                                
-                                if description:
-                                    items.append(BomItem(
-                                        line_no=len(items) + 1,
-                                        description=description[:100],
-                                        nsn=nsn,
-                                        qty=qty
-                                    ))
-                                    print(f"    Added item {len(items)} (pattern 2): {description[:30]}...")
-                        
-                        i += 1
+                            # Process rows
+                            for row in table[1:]:
+                                if 'lv' in col_indices and len(row) > col_indices['lv']:
+                                    lv_cell = row[col_indices['lv']]
+                                    if lv_cell and str(lv_cell).strip().upper() == 'B':
+                                        # Get middle text from description
+                                        description = ""
+                                        if 'desc' in col_indices and len(row) > col_indices['desc']:
+                                            desc_cell = row[col_indices['desc']]
+                                            if desc_cell:
+                                                # Try to get the middle part of the description
+                                                desc_text = str(desc_cell).strip()
+                                                # Split by newlines if present
+                                                lines = desc_text.split('\n')
+                                                if len(lines) >= 2:
+                                                    # Take the middle line (index 1)
+                                                    description = lines[1].strip()
+                                                else:
+                                                    # Fallback: take everything
+                                                    description = desc_text
+                                                
+                                                # Clean up
+                                                if ':' in description:
+                                                    description = description.split(':')[0].strip()
+                                                if '(' in description:
+                                                    description = description.split('(')[0].strip()
+                                                description = re.sub(r'\s+', ' ', description).strip()
+                                        
+                                        # Get NSN
+                                        nsn = ""
+                                        if 'material' in col_indices and len(row) > col_indices['material']:
+                                            material_cell = row[col_indices['material']]
+                                            if material_cell:
+                                                material_text = str(material_cell).strip()
+                                                nsn_match = re.search(r'\b(\d{9})\b', material_text)
+                                                if nsn_match:
+                                                    nsn = nsn_match.group(1)
+                                        
+                                        # Get quantity
+                                        qty = 1
+                                        if 'qty' in col_indices and len(row) > col_indices['qty']:
+                                            qty_cell = row[col_indices['qty']]
+                                            if qty_cell:
+                                                try:
+                                                    qty = int(str(qty_cell).strip())
+                                                except:
+                                                    qty = 1
+                                        
+                                        if description:
+                                            # Check if this is a duplicate
+                                            is_duplicate = False
+                                            for existing in items[-5:]:  # Check last 5 items
+                                                if existing.description == description:
+                                                    is_duplicate = True
+                                                    break
+                                            
+                                            if not is_duplicate:
+                                                items.append(BomItem(
+                                                    line_no=len(items) + 1,
+                                                    description=description[:100],
+                                                    nsn=nsn,
+                                                    qty=qty
+                                                ))
+                                                print(f"  Item {len(items)} (table): '{description[:40]}...'")
     
     except Exception as e:
         print(f"ERROR in extraction: {e}")
@@ -226,7 +243,7 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
         traceback.print_exc()
         return []
     
-    print(f"=== Total items extracted: {len(items)} ===")
+    print(f"\n=== Total items extracted: {len(items)} ===")
     return items
 
 
@@ -237,7 +254,7 @@ def generate_dd1750_from_pdf(bom_path, template_path, output_path, start_page=0)
         
         print(f"\n=== FINAL ITEM LIST ({len(items)} items) ===")
         for i, item in enumerate(items, 1):
-            print(f"{i:3d}. '{item.description[:40]}...' | NSN: {item.nsn} | Qty: {item.qty}")
+            print(f"{i:3d}. '{item.description}' | NSN: {item.nsn} | Qty: {item.qty}")
         print("=== END LIST ===\n")
         
         if not items:
@@ -275,7 +292,7 @@ def generate_dd1750_from_pdf(bom_path, template_path, output_path, start_page=0)
                 y_desc = y - 7.0
                 y_nsn = y - 12.2
                 
-                # Box number (actual item number, not page position)
+                # Box number
                 can.setFont("Helvetica", 8)
                 can.drawCentredString((X_BOX_L + X_BOX_R)/2, y_desc, str(item.line_no))
                 
@@ -316,12 +333,4 @@ def generate_dd1750_from_pdf(bom_path, template_path, output_path, start_page=0)
         
     except Exception as e:
         print(f"CRITICAL ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-        # Return empty template on any error
-        reader = PdfReader(template_path)
-        writer = PdfWriter()
-        writer.add_page(reader.pages[0])
-        with open(output_path, 'wb') as f:
-            writer.write(f)
-        return output_path, 0
+        import
