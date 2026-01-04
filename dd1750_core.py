@@ -1,10 +1,10 @@
-"""DD1750 core - Simple and working."""
+"""DD1750 core - Items only, no admin overlay."""
 
 import io
 import math
 import re
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List
 
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
@@ -109,10 +109,7 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
     return items
 
 
-def generate_dd1750_from_pdf(bom_path, template_path, output_path, start_page=0, admin_data=None):
-    if admin_data is None:
-        admin_data = {}
-    
+def generate_dd1750_from_pdf(bom_path, template_path, output_path, start_page=0):
     items = extract_items_from_pdf(bom_path, start_page)
     print(f"Items: {len(items)}")
     
