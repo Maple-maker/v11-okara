@@ -1,4 +1,4 @@
-"""DD1750 core - Fixed with correct quantity and admin fields."""
+"""DD1750 core - Fixed with proper PDF generation."""
 
 import io
 import math
@@ -10,10 +10,11 @@ import pdfplumber
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
+from reportlab.lib.pagesizes import letter
 
 
 ROWS_PER_PAGE = 18
-PAGE_W, PAGE_H = 612.0, 792.0
+PAGE_W, PAGE_H = letter  # Use exact letter size
 
 X_BOX_L, X_BOX_R = 44.0, 88.0
 X_CONTENT_L, X_CONTENT_R = 88.0, 365.0
@@ -63,8 +64,6 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                             elif 'AUTH' in text or 'QUANTITY' in text or 'QTY' in text:
                                 qty_idx = i
                     
-                    print(f"DEBUG: Columns - LV:{lv_idx}, DESC:{desc_idx}, MAT:{mat_idx}, QTY:{qty_idx}")
-                    
                     if lv_idx is None or desc_idx is None:
                         continue
                     
@@ -89,7 +88,7 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                         if not description:
                             continue
                         
-                        # Get NSN from Material column
+                        # Get NSN
                         nsn = ""
                         if mat_idx is not None and mat_idx < len(row):
                             mat_cell = row[mat_idx]
@@ -98,81 +97,25 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                                 if match:
                                     nsn = match.group(1)
                         
-                        # Get quantity from Auth Qty column
+                        # Get quantity
                         qty = 1
                         if qty_idx is not None and qty_idx < len(row):
                             qty_cell = row[qty_idx]
                             if qty_cell:
                                 try:
                                     qty_str = str(qty_cell).strip()
-                                    # Extract just the number
                                     qty_match = re.search(r'(\d+)', qty_str)
                                     if qty_match:
                                         qty = int(qty_match.group(1))
-                                    else:
-                                        qty = int(qty_str)
                                 except:
                                     qty = 1
-                        
-                        print(f"DEBUG: Item - {description[:30]}... | NSN: {nsn} | Qty: {qty}")
                         
                         items.append(BomItem(len(items) + 1, description[:100], nsn, qty))
     
     except Exception as e:
-        print(f"ERROR: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"ERROR extracting items: {e}")
     
     return items
-
-
-def _draw_admin(c, admin_data: Dict, page_num: int, total_pages: int):
-    font = "Helvetica"
-    
-    print(f"DEBUG: Drawing admin - page {page_num}, data: {admin_data}")
-    
-    # Unit - top left box (around x=44, y=745)
-    if admin_data.get('unit'):
-        c.setFont(font, 8)
-        c.drawString(50, 745, admin_data['unit'][:25])
-    
-    # Requisition No. - top middle (around x=300, y=745)
-    if admin_data.get('requisition_no'):
-        c.setFont(font, 8)
-        c.drawString(300, 745, f"REQ: {admin_data['requisition_no']}")
-    
-    # Page number - top right (around x=510, y=745)
-    if total_pages > 1:
-        c.setFont(font, 8)
-        c.drawString(500, 745, f"PAGE {page_num}/{total_pages}")
-    
-    # Date - second row left (around x=44, y=695)
-    if admin_data.get('date'):
-        c.setFont(font, 8)
-        c.drawString(50, 695, admin_data['date'])
-    
-    # Order No. - second row middle (around x=250, y=695)
-    if admin_data.get('order_no'):
-        c.setFont(font, 8)
-        c.drawString(250, 695, f"ORDER: {admin_data['order_no']}")
-    
-    # Total No. of Boxes - second row right (around x=450, y=695)
-    if admin_data.get('num_boxes'):
-        c.setFont(font, 8)
-        c.drawString(450, 695, f"BOXES: {admin_data['num_boxes']}")
-    
-    # Packed By - bottom section (appears on every page)
-    if admin_data.get('packed_by'):
-        c.setFont(font, 8)
-        c.drawString(44, 130, f"PACKED BY: {admin_data['packed_by']}")
-        c.setFont(font, 6)
-        c.drawString(44, 120, "(Signature)")
-    
-    # Received By - bottom section (appears on every page)
-    c.setFont(font, 8)
-    c.drawString(300, 130, "RECEIVED BY:")
-    c.setFont(font, 6)
-    c.drawString(300, 120, "(Signature)")
 
 
 def generate_dd1750_from_pdf(bom_path, template_path, output_path, start_page=0, admin_data=None):
@@ -180,27 +123,134 @@ def generate_dd1750_from_pdf(bom_path, template_path, output_path, start_page=0,
         admin_data = {}
     
     items = extract_items_from_pdf(bom_path, start_page)
-    print(f"\n=== Total items found: {len(items)} ===")
+    print(f"Items found: {len(items)}")
     
     if not items:
-        reader = PdfReader(template_path)
-        writer = PdfWriter()
-        writer.add_page(reader.pages[0])
-        with open(output_path, 'wb') as f:
-            writer.write(f)
+        # Return empty template
+        try:
+            reader = PdfReader(template_path)
+            writer = PdfWriter()
+            writer.add_page(reader.pages[0])
+            with open(output_path, 'wb') as f:
+                writer.write(f)
+        except:
+            pass
         return output_path, 0
     
     total_pages = math.ceil(len(items) / ROWS_PER_PAGE)
-    print(f"Creating {total_pages} pages\n")
+    print(f"Creating {total_pages} pages")
     
     writer = PdfWriter()
     
     for page_num in range(total_pages):
-        print(f"Creating page {page_num + 1}/{total_pages}")
-        
-        start_idx = page_num * ROWS_PER_PAGE
-        end_idx = min((page_num + 1) * ROWS_PER_PAGE, len(items))
-        page_items = items[start_idx:end_idx]
-        
-        packet = io.BytesIO()
-        can
+        try:
+            start_idx = page_num * ROWS_PER_PAGE
+            end_idx = min((page_num + 1) * ROWS_PER_PAGE, len(items))
+            page_items = items[start_idx:end_idx]
+            
+            # Create PDF overlay using ReportLab
+            packet = io.BytesIO()
+            c = canvas.Canvas(packet, pagesize=letter)
+            
+            first_row_top = Y_TABLE_TOP_LINE - 5.0
+            
+            # Draw item rows
+            for i, item in enumerate(page_items):
+                y = first_row_top - (i * ROW_H)
+                y_desc = y - 7.0
+                y_nsn = y - 12.2
+                
+                # Box number
+                c.setFont("Helvetica", 8)
+                c.drawCentredString((X_BOX_L + X_BOX_R) / 2, y_desc, str(item.line_no))
+                
+                # Description
+                c.setFont("Helvetica", 7)
+                desc = item.description[:50] if len(item.description) > 50 else item.description
+                c.drawString(X_CONTENT_L + PAD_X, y_desc, desc)
+                
+                # NSN
+                if item.nsn:
+                    c.setFont("Helvetica", 6)
+                    c.drawString(X_CONTENT_L + PAD_X, y_nsn, f"NSN: {item.nsn}")
+                
+                # Quantities
+                c.setFont("Helvetica", 8)
+                c.drawCentredString((X_UOI_L + X_UOI_R) / 2, y_desc, "EA")
+                c.drawCentredString((X_INIT_L + X_INIT_R) / 2, y_desc, str(item.qty))
+                c.drawCentredString((X_SPARES_L + X_SPARES_R) / 2, y_desc, "0")
+                c.drawCentredString((X_TOTAL_L + X_TOTAL_R) / 2, y_desc, str(item.qty))
+            
+            # Draw admin fields on EVERY page
+            # Unit
+            if admin_data.get('unit'):
+                c.setFont("Helvetica", 8)
+                c.drawString(50, 745, admin_data['unit'][:25])
+            
+            # Requisition No.
+            if admin_data.get('requisition_no'):
+                c.setFont("Helvetica", 8)
+                c.drawString(300, 745, f"REQ: {admin_data['requisition_no']}")
+            
+            # Page number
+            if total_pages > 1:
+                c.setFont("Helvetica", 8)
+                c.drawString(500, 745, f"PAGE {page_num + 1}/{total_pages}")
+            
+            # Date
+            if admin_data.get('date'):
+                c.setFont("Helvetica", 8)
+                c.drawString(50, 695, admin_data['date'])
+            
+            # Order No.
+            if admin_data.get('order_no'):
+                c.setFont("Helvetica", 8)
+                c.drawString(250, 695, f"ORDER: {admin_data['order_no']}")
+            
+            # Total No. of Boxes
+            if admin_data.get('num_boxes'):
+                c.setFont("Helvetica", 8)
+                c.drawString(450, 695, f"BOXES: {admin_data['num_boxes']}")
+            
+            # Packed By
+            if admin_data.get('packed_by'):
+                c.setFont("Helvetica", 8)
+                c.drawString(44, 130, f"PACKED BY: {admin_data['packed_by']}")
+                c.setFont("Helvetica", 6)
+                c.drawString(44, 120, "(Signature)")
+            
+            # Received By
+            c.setFont("Helvetica", 8)
+            c.drawString(300, 130, "RECEIVED BY:")
+            c.setFont("Helvetica", 6)
+            c.drawString(300, 120, "(Signature)")
+            
+            # Save the canvas
+            c.save()
+            packet.seek(0)
+            
+            # Merge with template
+            overlay_reader = PdfReader(packet)
+            template_reader = PdfReader(template_path)
+            page = template_reader.pages[0]
+            page.merge_page(overlay_reader.pages[0])
+            writer.add_page(page)
+            
+        except Exception as e:
+            print(f"Error on page {page_num + 1}: {e}")
+            # Add blank page if this page fails
+            try:
+                template_reader = PdfReader(template_path)
+                writer.add_page(template_reader.pages[0])
+            except:
+                pass
+    
+    # Write output
+    try:
+        with open(output_path, 'wb') as f:
+            writer.write(f)
+        print(f"Successfully wrote {output_path}")
+    except Exception as e:
+        print(f"Error writing output: {e}")
+    
+    return output_path, len(items)
