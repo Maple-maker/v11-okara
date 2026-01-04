@@ -1,4 +1,4 @@
-"""DD1750 core - With proper box positioning."""
+"""DD1750 core - Simple and working."""
 
 import io
 import math
@@ -34,21 +34,6 @@ class BomItem:
     description: str
     nsn: str
     qty: int
-
-
-# Admin field positions (from DD1750 template boxes)
-ADMIN_POSITIONS = {
-    # Top section boxes
-    'unit': {'x': 44, 'y': 745, 'width': 200},  # UNIT box
-    'requisition': {'x': 300, 'y': 745, 'width': 150},  # REQUISITION NO.
-    'page': {'x': 500, 'y': 745, 'width': 60},  # PAGE
-    'date': {'x': 44, 'y': 695, 'width': 120},  # DATE box
-    'order_no': {'x': 250, 'y': 695, 'width': 150},  # ORDER NO.
-    'total_boxes': {'x': 450, 'y': 695, 'width': 100},  # TOTAL NO. OF BOXES
-    # Bottom section (appears on every page)
-    'packed_by': {'x': 44, 'y': 130, 'width': 200},  # PACKED BY signature line
-    'received_by': {'x': 300, 'y': 130, 'width': 200},  # RECEIVED BY
-}
 
 
 def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
@@ -127,72 +112,45 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
     return items
 
 
-def _truncate_to_fit(text: str, font: str, size: float, max_width: float) -> str:
-    """Truncate text to fit in a specific width."""
-    if not text:
-        return ""
-    
-    while pdfmetrics.stringWidth(text, font, size) > max_width and len(text) > 3:
-        text = text[:-1]
-    
-    return text.strip()
-
-
-def _draw_admin_on_page(c, admin_data: Dict, page_num: int, total_pages: int):
-    """Draw admin fields in their proper boxes on EVERY page."""
+def _draw_admin(c, admin_data: Dict, page_num: int, total_pages: int):
     font = "Helvetica"
     
-    # UNIT (top left)
+    # Unit (top left box)
     if admin_data.get('unit'):
         c.setFont(font, 8)
-        text = _truncate_to_fit(admin_data['unit'], font, 8, ADMIN_POSITIONS['unit']['width'])
-        c.drawString(ADMIN_POSITIONS['unit']['x'], ADMIN_POSITIONS['unit']['y'], text)
+        c.drawString(50, 745, admin_data['unit'][:30])
     
-    # REQUISITION NO.
+    # Requisition No.
     if admin_data.get('requisition_no'):
         c.setFont(font, 8)
-        text = _truncate_to_fit(admin_data['requisition_no'], font, 8, ADMIN_POSITIONS['requisition']['width'])
-        c.drawString(ADMIN_POSITIONS['requisition']['x'], ADMIN_POSITIONS['requisition']['y'], f"REQ: {text}")
+        c.drawString(300, 745, f"REQ: {admin_data['requisition_no']}")
     
-    # PAGE (top right)
+    # Page number
     if total_pages > 1:
         c.setFont(font, 8)
-        page_text = f"{page_num}/{total_pages}"
-        c.drawString(ADMIN_POSITIONS['page']['x'], ADMIN_POSITIONS['page']['y'], page_text)
+        c.drawString(510, 745, f"{page_num}/{total_pages}")
     
-    # DATE
+    # Date
     if admin_data.get('date'):
         c.setFont(font, 8)
-        text = _truncate_to_fit(admin_data['date'], font, 8, ADMIN_POSITIONS['date']['width'])
-        c.drawString(ADMIN_POSITIONS['date']['x'], ADMIN_POSITIONS['date']['y'], text)
+        c.drawString(50, 695, admin_data['date'])
     
-    # ORDER NO.
+    # Order No.
     if admin_data.get('order_no'):
         c.setFont(font, 8)
-        text = _truncate_to_fit(admin_data['order_no'], font, 8, ADMIN_POSITIONS['order_no']['width'])
-        c.drawString(ADMIN_POSITIONS['order_no']['x'], ADMIN_POSITIONS['order_no']['y'], text)
+        c.drawString(250, 695, admin_data['order_no'])
     
-    # TOTAL NO. OF BOXES
+    # Total No. of Boxes
     if admin_data.get('num_boxes'):
         c.setFont(font, 8)
-        text = _truncate_to_fit(admin_data['num_boxes'], font, 8, ADMIN_POSITIONS['total_boxes']['width'])
-        c.drawString(ADMIN_POSITIONS['total_boxes']['x'], ADMIN_POSITIONS['total_boxes']['y'], text)
+        c.drawString(450, 695, admin_data['num_boxes'])
     
-    # PACKED BY (bottom section - on EVERY page)
+    # Packed By (bottom - on every page)
     if admin_data.get('packed_by'):
         c.setFont(font, 8)
-        text = _truncate_to_fit(admin_data['packed_by'], font, 8, ADMIN_POSITIONS['packed_by']['width'])
-        c.drawString(ADMIN_POSITIONS['packed_by']['x'], ADMIN_POSITIONS['packed_by']['y'], f"PACKED BY: {text}")
-        
-        # Draw signature line
+        c.drawString(50, 130, f"PACKED BY: {admin_data['packed_by']}")
         c.setFont(font, 6)
-        c.drawString(ADMIN_POSITIONS['packed_by']['x'], ADMIN_POSITIONS['packed_by']['y'] - 10, "(Signature)")
-    
-    # RECEIVED BY (bottom section - on EVERY page)
-    c.setFont(font, 8)
-    c.drawString(ADMIN_POSITIONS['received_by']['x'], ADMIN_POSITIONS['received_by']['y'], "RECEIVED BY:")
-    c.setFont(font, 6)
-    c.drawString(ADMIN_POSITIONS['received_by']['x'], ADMIN_POSITIONS['received_by']['y'] - 10, "(Signature)")
+        c.drawString(50, 120, "(Signature)")
 
 
 def generate_dd1750_from_pdf(bom_path, template_path, output_path, start_page=0, admin_data=None):
@@ -222,7 +180,6 @@ def generate_dd1750_from_pdf(bom_path, template_path, output_path, start_page=0,
         can = canvas.Canvas(packet, pagesize=(PAGE_W, PAGE_H))
         first_row_top = Y_TABLE_TOP_LINE - 5.0
         
-        # Draw item rows
         for i, item in enumerate(page_items):
             y = first_row_top - (i * ROW_H)
             y_desc = y - 7.0
@@ -245,8 +202,8 @@ def generate_dd1750_from_pdf(bom_path, template_path, output_path, start_page=0,
             can.drawCentredString((X_SPARES_L + X_SPARES_R)/2, y_desc, "0")
             can.drawCentredString((X_TOTAL_L + X_TOTAL_R)/2, y_desc, str(item.qty))
         
-        # Draw admin fields on EVERY page
-        _draw_admin_on_page(can, admin_data, page_num + 1, total_pages)
+        # Draw admin on every page
+        _draw_admin(can, admin_data, page_num + 1, total_pages)
         
         can.save()
         packet.seek(0)
