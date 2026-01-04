@@ -1,4 +1,4 @@
-"""DD1750 core - Final version."""
+"""DD1750 core - Simple and working."""
 
 import io
 import math
@@ -111,6 +111,7 @@ def generate_dd1750_from_pdf(bom_path, template_path, output_path):
     total_pages = math.ceil(len(items) / ROWS_PER_PAGE)
     
     reader = PdfReader(template_path)
+    first_page = reader.pages[0]
     
     writer = PdfWriter()
     
@@ -119,18 +120,10 @@ def generate_dd1750_from_pdf(bom_path, template_path, output_path):
         end_idx = min((page_num + 1) * ROWS_PER_PAGE, len(items))
         page_items = items[start_idx:end_idx]
         
-        page = reader.pages[0]
+        page = reader.pages[page_num] if page_num < len(reader.pages) else first_page
         
-        # Create overlay with clipping
         packet = io.BytesIO()
         c = canvas.Canvas(packet, pagesize=letter)
-        
-        # Clip to table area only
-        c.beginPath()
-        c.rect(0, 0, PAGE_W, Y_TABLE_TOP)
-        c.clip()
-        
-        # Draw items
         first_row = Y_TABLE_TOP - 5.0
         
         for i, item in enumerate(page_items):
