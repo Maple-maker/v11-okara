@@ -11,6 +11,9 @@ def index():
 
 @app.route('/generate', methods=['POST'])
 def generate():
+    if 'bom_file' not in request.files or 'template_file' not in request.files:
+        return render_template('index.html')
+    
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             bom_path = os.path.join(tmpdir, 'bom.pdf')
@@ -20,16 +23,15 @@ def generate():
             request.files['bom_file'].save(bom_path)
             request.files['template_file'].save(tpl_path)
             
-            start_page = int(request.form.get('start_page', 0))
-            out_path, count = generate_dd1750_from_pdf(bom_path, tpl_path, out_path, start_page)
+            out_path, count = generate_dd1750_from_pdf(bom_path, tpl_path, out_path)
             
             if count == 0:
-                return "No items found", 400
+                return render_template('index.html', error="No items found")
             
             return send_file(out_path, as_attachment=True, download_name='DD1750.pdf')
-            
+    
     except Exception as e:
-        return f"Error: {str(e)}", 500
+        return render_template('index.html', error=f"Error: {str(e)}")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8000))
