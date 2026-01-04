@@ -62,8 +62,7 @@ def generate():
                 flash('No items found')
                 return redirect('/')
             
-            filename = f"DD1750_{item_count}_items.pdf"
-            return send_file(output_path, as_attachment=True, download_name=filename)
+            return send_file(output_path, as_attachment=True, download_name='DD1750.pdf')
             
     except Exception as e:
         flash(f'Error: {str(e)}')
