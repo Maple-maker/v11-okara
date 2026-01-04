@@ -6,7 +6,7 @@ from werkzeug.utils import secure_filename
 from dd1750_core import generate_dd1750_from_pdf
 
 app = Flask(__name__)
-app.secret_key = 'dev-key-change-in-production'
+app.secret_key = 'dev-key'
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {'pdf'}
@@ -41,10 +41,10 @@ def generate():
             'num_boxes': request.form.get('num_boxes', '').strip(),
             'requisition_no': request.form.get('requisition_no', '').strip(),
             'order_no': request.form.get('order_no', '').strip(),
-            'date': request.form.get('date', datetime.now().strftime('%Y-%m-%d')).strip(),
+            'date': request.form.get('date', '').strip(),
+            'end_item': request.form.get('end_item', '').strip(),
+            'model': request.form.get('model', '').strip(),
         }
-        
-        print(f"DEBUG: Admin data received: {admin_data}")
         
         with tempfile.TemporaryDirectory() as temp_dir:
             bom_path = os.path.join(temp_dir, 'bom.pdf')
@@ -59,14 +59,13 @@ def generate():
             )
             
             if item_count == 0:
-                flash('No items found in BOM')
+                flash('No items found')
                 return redirect('/')
             
-            filename = f"DD1750_{admin_data['requisition_no'] or 'filled'}_{item_count}_items.pdf"
+            filename = f"DD1750_{item_count}_items.pdf"
             return send_file(output_path, as_attachment=True, download_name=filename)
             
     except Exception as e:
-        print(f"ERROR: {e}")
         flash(f'Error: {str(e)}')
         return redirect('/')
 
