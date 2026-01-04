@@ -4,6 +4,7 @@ from flask import Flask, render_template, request, send_file, flash
 from dd1750_core import generate_dd1750_from_pdf
 
 app = Flask(__name__)
+app.secret_key = 'dd1750-secret-key-2026'  # Added secret key
 
 @app.route('/')
 def index():
@@ -12,7 +13,6 @@ def index():
 @app.route('/generate', methods=['POST'])
 def generate():
     try:
-        # Save uploaded files first
         with tempfile.TemporaryDirectory() as tmpdir:
             bom_path = os.path.join(tmpdir, 'bom.pdf')
             tpl_path = os.path.join(tmpdir, 'tpl.pdf')
@@ -24,15 +24,13 @@ def generate():
             out_path, count = generate_dd1750_from_pdf(bom_path, tpl_path, out_path)
             
             if count == 0:
-                flash('No items found')
-                return redirect('/')
+                return "No items found", 400
             
             return send_file(out_path, as_attachment=True, download_name='DD1750.pdf')
             
     except Exception as e:
         print(f"ERROR: {e}")
-        flash(f'Error: {str(e)}')
-        return redirect('/')
+        return f"Error: {str(e)}", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8000))
