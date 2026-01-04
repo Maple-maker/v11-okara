@@ -8,25 +8,6 @@ app = Flask(__name__)
 @app.route('/')
 def index():
     return render_template('index.html')
-    
-@app.route('/generate', methods=['POST'])
-def generate():
-    # ... file handling ...
-    
-    try:
-        admin_data = {
-            'unit': request.form.get('unit', '').strip(),
-            'packed_by': request.form.get('packed_by', '').strip(),
-            'date': request.form.get('date', '').strip(),
-            'requisition_no': request.form.get('requisition_no', '').strip(),
-            'order_no': request.form.get('order_no', '').strip(),
-            'num_boxes': request.form.get('num_boxes', '').strip(),
-        }
-        
-        # ... save files ...
-        out_path, count = generate_dd1750_from_pdf(bom_path, tpl_path, out_path, 0, admin_data)
-        
-        # ... return file ...
 
 @app.route('/generate', methods=['POST'])
 def generate():
