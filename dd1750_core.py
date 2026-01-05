@@ -1,4 +1,4 @@
-"""DD1750 core - Items Only (Simple, Working Version)."""
+"""DD1750 core - Robust with debug logging."""
 
 import io
 import math
@@ -12,7 +12,7 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.lib.pagesizes import letter
 
-
+# Constants
 ROWS_PER_PAGE = 18
 PAGE_W, PAGE_H = letter
 
@@ -38,130 +38,4 @@ class BomItem:
     qty: int
 
 
-def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
-    items = []
-    
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages[start_page:]:
-                tables = page.extract_tables()
-                
-                for table in tables:
-                    if len(table) < 2:
-                        continue
-                    
-                    header = table[0]
-                    lv_idx = desc_idx = mat_idx = auth_idx = -1
-                    
-                    for i, cell in enumerate(header):
-                        if cell:
-                            text = str(cell).upper()
-                            if 'LV' in text or 'LEVEL' in text:
-                                lv_idx = i
-                            elif 'DESC' in text:
-                                desc_idx = i
-                            elif 'MATERIAL' in text:
-                                mat_idx = i
-                            elif 'AUTH' in text and 'QTY' in text:
-                                auth_idx = i
-                    
-                    if lv_idx == -1 or desc_idx == -1:
-                        continue
-                    
-                    for row in table[1:]:
-                        if not any(cell for cell in row if cell):
-                            continue
-                        
-                        lv_cell = row[lv_idx] if lv_idx < len(row) else None
-                        if not lv_cell or str(lv_cell).strip().upper() != 'B':
-                            continue
-                        
-                        desc_cell = row[desc_idx] if desc_idx < len(row) else None
-                        description = ""
-                        if desc_cell:
-                            lines = str(desc_cell).strip().split('\n')
-                            description = lines[1].strip() if len(lines) >= 2 else lines[0].strip()
-                            if '(' in description:
-                                description = description.split('(')[0].strip()
-                            description = re.sub(r'\s+(WTY|ARC|CIIC|UI|SCMC|EA|AY|9K|9G)$', '', description, flags=re.IGNORECASE)
-                            description = re.sub(r'\s+', ' ', description).strip()
-                        
-                        if not description:
-                            continue
-                        
-                        nsn = ""
-                        if mat_idx > -1 and mat_idx < len(row):
-                            mat_cell = row[mat_idx]
-                            if mat_cell:
-                                match = re.search(r'\b(\d{9})\b', str(mat_cell))
-                                if match:
-                                    nsn = match.group(1)
-                        
-                        qty = 1
-                        if auth_idx > -1 and auth_idx < len(row):
-                            qty_cell = row[auth_idx]
-                            if qty_cell:
-                                match = re.search(r'(\d+)', str(qty_cell))
-                                if match:
-                                    qty = int(match.group(1))
-                        
-                        items.append(BomItem(len(items) + 1, description[:100], nsn, qty))
-    
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return []
-    
-    return items
-
-
-def generate_dd1750_from_pdf(bom_path: str, template_path: str, out_path: str, start_page: int = 0):
-    """Generate DD1750 with items overlayed on template (First Page Only)."""
-    
-    items = extract_items_from_pdf(bom_path, start_page)
-    
-    print(f"\nItems found: {len(items)}")
-    
-    if not items:
-        try:
-            reader = PdfReader(template_path)
-            writer = PdfWriter()
-            writer.add_page(reader.pages[0])
-            with open(out_path, 'wb') as f:
-                writer.write(f)
-        except:
-            pass
-        return out_path, 0
-    
-    total_pages = math.ceil(len(items) / ROWS_PER_PAGE)
-    writer = PdfWriter()
-    
-    # Read template
-    reader = PdfReader(template_path)
-    template_page = reader.pages[0]
-    
-    for page_num in range(total_pages):
-        start_idx = page_num * ROWS_PER_PAGE
-        end_idx = min((page_num + 1) * ROWS_PER_PAGE, len(items))
-        page_items = items[start_idx:end_idx]
-        
-        # Create overlay
-        packet = io.BytesIO()
-        c = canvas.Canvas(packet, pagesize=letter)
-        
-        first_row = Y_TABLE_TOP - 5.0
-        
-        for i, item in enumerate(page_items):
-            y = first_row - (i * ROW_H)
-            
-            c.setFont("Helvetica", 8)
-            c.drawCentredString((X_BOX_L + X_BOX_R) / 2, y - 7, str(item.line_no))
-            
-            c.setFont("Helvetica", 7)
-            c.drawString(X_CONTENT_L + PAD_X, y - 7, item.description[:50])
-            
-            if item.nsn:
-                c.setFont("Helvetica", 6)
-                c.drawString(X_CONTENT_L + PAD_X, y - 12, f"NSN: {item.nsn}")
-            
-            c.setFont("Helvetica", 8)
-            c.drawCentredString((X_UOI_L + X_UOI_R) / 2, y - 7, "EA")
+def extract_items_from_pdf(pdf_path: str) -> List[BomItem]:
