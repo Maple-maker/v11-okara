@@ -12,16 +12,19 @@ def index():
 @app.route('/generate', methods=['POST'])
 def generate():
     if 'bom_file' not in request.files:
-        return render_template('index.html', error="No BOM PDF uploaded")
+        return render_template('index.html', error='No BOM PDF uploaded')
     
     if 'template_file' not in request.files:
-        return render_template('index.html', error="No DD1750 Template PDF uploaded")
+        return render_template('index.html', error='No DD1750 Template PDF uploaded')
     
     bom_file = request.files['bom_file']
     template_file = request.files['template_file']
     
     if bom_file.filename == '' or template_file.filename == '':
-        return render_template('index.html', error="Both files must be selected")
+        return render_template('index.html', error='Both files must be selected')
+    
+    if not (bom_file.filename.lower().endswith('.pdf') and template_file.filename.lower().endswith('.pdf')):
+        return render_template('index.html', error='Both files must be PDF format')
     
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -31,7 +34,6 @@ def generate():
             
             print(f"DEBUG: Saving BOM to {bom_path}")
             print(f"DEBUG: Saving template to {tpl_path}")
-            print(f"DEBUG: Output path: {out_path}")
             
             bom_file.save(bom_path)
             template_file.save(tpl_path)
@@ -44,18 +46,20 @@ def generate():
             )
             
             print(f"DEBUG: Generation complete. Count: {count}")
-            print(f"DEBUG: Checking if output file exists...")
+            
+            if count == 0:
+                return render_template('index.html', error='No items found in BOM')
             
             if not os.path.exists(out_path):
                 print(f"ERROR: Output file not found at {out_path}")
-                return render_template('index.html', error="Internal error: PDF could not be generated")
+                return render_template('index.html', error='Internal error: PDF could not be generated')
             
             file_size = os.path.getsize(out_path)
-            print(f"DEBUG: Output file size: {file_size} bytes")
+            print(f"DEBUG: Output file size: {file_size}")
             
             if file_size == 0:
                 print("ERROR: Output file is empty (0 bytes)")
-                return render_template('index.html', error="Internal error: Generated PDF is empty")
+                return render_template('index.html', error='Internal error: Generated PDF is empty')
             
             print(f"DEBUG: Sending file to user...")
             return send_file(out_path, as_attachment=True, download_name='DD1750.pdf')
@@ -64,7 +68,7 @@ def generate():
         print(f"CRITICAL ERROR: {e}")
         import traceback
         traceback.print_exc()
-        return render_template('index.html', error=f"Error: {str(e)}")
+        return render_template('index.html', error=f'Error: {str(e)}')
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8000))
