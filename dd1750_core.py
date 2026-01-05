@@ -1,4 +1,4 @@
-"""DD1750 core - Items only (no admin)."""
+"""DD1750 core - Simple and crash-proof."""
 
 import io
 import math
@@ -13,7 +13,6 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.lib.pagesizes import letter
 
 
-ROWS_PER_PAGE = 18
 PAGE_W, PAGE_H = letter
 
 X_BOX_L, X_BOX_R = 44.0, 88.0
@@ -25,6 +24,7 @@ X_TOTAL_L, X_TOTAL_R = 514.5, 566.0
 
 Y_TABLE_TOP = 616.0
 Y_TABLE_BOTTOM = 89.5
+ROWS_PER_PAGE = 18
 ROW_H = (Y_TABLE_TOP - Y_TABLE_BOTTOM) / ROWS_PER_PAGE
 PAD_X = 3.0
 
@@ -79,85 +79,4 @@ def extract_items_from_pdf(pdf_path: str, start_page: int = 0) -> List[BomItem]:
                         description = ""
                         if desc_cell:
                             lines = str(desc_cell).strip().split('\n')
-                            description = lines[1].strip() if len(lines) >= 2 else lines[0].strip()
-                            
-                            description = re.sub(r'\s+(WTY|ARC|CIIC|UI|SCMC|EA|AY|9K|9G)$', '', description, flags=re.IGNORECASE)
-                            description = re.sub(r'\s+', ' ', description).strip()
-                        
-                        if not description:
-                            continue
-                        
-                        nsn = ""
-                        if mat_idx > -1 and mat_idx < len(row):
-                            mat_cell = row[mat_idx]
-                            if mat_cell:
-                                match = re.search(r'\b(\d{9})\b', str(mat_cell))
-                                if match:
-                                    nsn = match.group(1)
-                        
-                        qty = 1
-                        if auth_idx > -1 and auth_idx < len(row):
-                            qty_cell = row[auth_idx]
-                            if qty_cell:
-                                match = re.search(r'(\d+)', str(qty_cell))
-                                if match:
-                                    qty = int(match.group(1))
-                        
-                        items.append(BomItem(
-                            line_no=len(items) + 1,
-                            description=description[:100],
-                            nsn=nsn,
-                            qty=qty
-                        ))
-    
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return []
-    
-    return items
-
-
-def generate_dd1750_from_pdf(bom_path: str, template_path: str, out_path: str, start_page: int = 0):
-    """Generate items ONLY PDF. Form fields must be filled in Adobe Acrobat."""
-    
-    try:
-        items = extract_items_from_pdf(bom_path, start_page)
-        
-        print(f"Items found: {len(items)}")
-        
-        if not items:
-            return out_path, 0
-        
-        total_pages = math.ceil(len(items) / ROWS_PER_PAGE)
-        
-        writer = PdfWriter()
-        template = PdfReader(template_path)
-        
-        for page_num in range(total_pages):
-            start_idx = page_num * ROWS_PER_PAGE
-            end_idx = min((page_num + 1) * ROWS_PER_PAGE, len(items))
-            page_items = items[start_idx:end_idx]
-            
-            # Create items page (no template merge)
-            packet = io.BytesIO()
-            c = canvas.Canvas(packet, pagesize=letter)
-            
-            # Draw items
-            first_row_top = Y_TABLE_TOP - 5.0
-            
-            for i, item in enumerate(page_items):
-                y = first_row_top - (i * ROW_H)
-                
-                c.setFont("Helvetica", 8)
-                c.drawCentredString((X_BOX_L + X_BOX_R) / 2, y - 7, str(item.line_no))
-                
-                c.setFont("Helvetica", 7)
-                c.drawString(X_CONTENT_L + PAD_X, y - 7, item.description[:50])
-                
-                if item.nsn:
-                    c.setFont("Helvetica", 6)
-                    c.drawString(X_CONTENT_L + PAD_X, y - 12, f"NSN: {item.nsn}")
-                
-                c.setFont("Helvetica", 8)
-                c.drawCentredString((X_UOI_L + X_UOI_R) / 2, y - 7, "EA")
-                c.drawCentredString((X_INIT_L +
+                            description = lines[1].strip() if len(lines) >= 2
