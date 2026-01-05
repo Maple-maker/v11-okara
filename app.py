@@ -20,6 +20,9 @@ def generate():
     bom_file = request.files['bom_file']
     template_file = request.files['template_file']
     
+    if bom_file.filename == '' or template_file.filename == '':
+        return render_template('index.html', error="Both files must be selected")
+    
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             bom_path = os.path.join(tmpdir, 'bom.pdf')
@@ -29,10 +32,14 @@ def generate():
             bom_file.save(bom_path)
             template_file.save(tpl_path)
             
-            out_path, count = generate_dd1750_from_pdf(bom_path, tpl_path, out_path)
+            out_path, count = generate_dd1750_from_pdf(
+                bom_pdf_path=bom_path,
+                template_pdf_path=tpl_path,
+                out_pdf_path=out_path
+            )
             
             if count == 0:
-                return render_template('index.html', error="No items found in BOM")
+                return render_template('index.html', error="No items found in BOM PDF")
             
             return send_file(out_path, as_attachment=True, download_name='DD1750.pdf')
     
